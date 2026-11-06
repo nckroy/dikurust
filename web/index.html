@@ -16,18 +16,67 @@
     --glass: #031407;                /* unlit tube */
     --case: #0b0c0a;
     --glow:
-      0 0 1px rgba(var(--phos), .9),
-      0 0 4px rgba(var(--phos), .55),
-      0 0 12px rgba(var(--phos), .28);
+      0 0 1px rgba(var(--phos), .6),
+      0 0 3px rgba(var(--phos), .35),
+      0 0 10px rgba(var(--phos), .18);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
-    background: var(--case) radial-gradient(ellipse at 50% 40%, #1a1c18 0%, var(--case) 70%);
+    background: #24251f radial-gradient(ellipse at 50% 35%, #3b3c35 0%, #24251f 75%);
     color: var(--text);
     font: 16px/1.35 "VT323", "Glass TTY VT220", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-    padding: 18px;
+    padding: 14px;
     overflow: hidden;
+  }
+
+  /* ---- the cabinet: black moulded plastic, deep chin below the tube ---- */
+  #monitor {
+    position: relative; height: 100%;
+    display: flex; flex-direction: column;
+    padding: 30px 38px 62px;
+    border-radius: 22px 22px 16px 16px;
+    background:
+      linear-gradient(to bottom, rgba(255, 255, 255, .07), transparent 9%),
+      linear-gradient(to top, rgba(255, 255, 255, .03), transparent 14%),
+      linear-gradient(to right, rgba(255, 255, 255, .03), transparent 6%, transparent 94%, rgba(255, 255, 255, .02)),
+      #0e0e0d;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .12),
+      inset 0 -3px 6px rgba(0, 0, 0, .7),
+      inset 0 0 0 1px #000,
+      0 24px 50px rgba(0, 0, 0, .85),
+      0 2px 0 #000;
+  }
+  /* the moulded opening the tube sits in */
+  #bezel {
+    position: relative; flex: 1; min-height: 0;
+    padding: 10px;
+    border-radius: 30px / 26px;
+    background: #050505;
+    box-shadow:
+      inset 0 6px 12px rgba(0, 0, 0, .95),
+      inset 0 -1px 0 rgba(255, 255, 255, .06),
+      0 -1px 0 rgba(0, 0, 0, .9),
+      0 1px 0 rgba(255, 255, 255, .07);
+  }
+  /* nameplate in the lower-left of the chin */
+  #badge {
+    position: absolute; left: 44px; bottom: 20px;
+    display: flex; align-items: baseline; gap: .55em;
+    font: 13px/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #9a9d99; letter-spacing: .04em; white-space: nowrap;
+    text-shadow: 0 -1px 0 #000, 0 1px 0 rgba(255, 255, 255, .12);
+    user-select: none;
+  }
+  #badge b { font-weight: 800; font-size: 15px; letter-spacing: .14em; color: #c4c7c2; }
+  #badge i { font-style: italic; }
+  /* power lamp, lower right */
+  #lamp {
+    position: absolute; right: 48px; bottom: 25px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #6dff8a;
+    box-shadow: 0 0 6px 1px rgba(109, 255, 138, .7), inset 0 -1px 1px rgba(0, 0, 0, .4);
   }
 
   /* ---- the tube ---- */
@@ -35,13 +84,9 @@
     position: relative; height: 100%;
     display: flex; flex-direction: column;
     background: radial-gradient(ellipse at 50% 45%, #062610 0%, var(--glass) 75%);
-    border-radius: 28px / 22px;
+    border-radius: 24px / 20px;
     overflow: hidden;
-    box-shadow:
-      0 0 0 2px #000,
-      0 0 0 14px #181915,
-      0 0 0 15px #2a2b26,
-      0 20px 60px rgba(0, 0, 0, .8);
+    box-shadow: 0 0 0 1px #000;
     isolation: isolate;
     animation: power-on .9s cubic-bezier(.2, .8, .2, 1) both;
   }
@@ -50,7 +95,8 @@
     position: relative; flex: 1; min-height: 0;
     display: flex; flex-direction: column;
     text-shadow: var(--glow);
-    filter: blur(.35px) contrast(1.15) brightness(1.08);
+    filter: contrast(1.1) brightness(1.05);
+    -webkit-font-smoothing: antialiased;
     animation: flicker 6s infinite steps(1);
   }
 
@@ -90,8 +136,8 @@
      the real one when it moves and fades when it is cleared. */
   #ghost {
     overflow: hidden; pointer-events: none; user-select: none;
-    color: rgba(var(--phos), .22); text-shadow: 0 0 6px rgba(var(--phos), .5);
-    filter: blur(1.2px);
+    color: rgba(var(--phos), .12); text-shadow: 0 0 5px rgba(var(--phos), .3);
+    filter: blur(1px);
     transition: opacity 1.4s ease-out;
   }
   #ghost > div { transition: transform .45s cubic-bezier(.1, .7, .3, 1); will-change: transform; }
@@ -111,13 +157,13 @@
   #scan {
     z-index: 2;
     background: repeating-linear-gradient(to bottom,
-      rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0) 1px, rgba(0, 0, 0, .38) 2px, rgba(0, 0, 0, .38) 3px);
+      transparent 0, transparent 1px, rgba(0, 0, 0, .28) 1px, rgba(0, 0, 0, .28) 2px);
   }
   /* interlace: alternate fields drawn on alternate frames */
   #interlace {
     z-index: 3;
     background: repeating-linear-gradient(to bottom,
-      rgba(0, 0, 0, .14) 0, rgba(0, 0, 0, .14) 1px, transparent 1px, transparent 3px);
+      rgba(0, 0, 0, .1) 0, rgba(0, 0, 0, .1) 1px, transparent 1px, transparent 4px);
     animation: interlace .034s steps(1) infinite;
   }
   /* analogue noise */
@@ -185,7 +231,12 @@
 
   @media (max-width: 600px) {
     body { padding: 6px; font-size: 14px; }
-    #crt { border-radius: 14px / 10px; box-shadow: 0 0 0 2px #000, 0 0 0 6px #181915; }
+    #monitor { padding: 14px 14px 40px; border-radius: 14px 14px 10px 10px; }
+    #bezel { padding: 5px; border-radius: 16px / 12px; }
+    #crt { border-radius: 14px / 10px; }
+    #badge { left: 18px; bottom: 13px; font-size: 11px; }
+    #badge b { font-size: 12px; }
+    #lamp { right: 20px; bottom: 17px; }
     header, form { padding-left: 16px; padding-right: 16px; }
     #out, #ghost { padding: 10px 16px; }
     header h1 { letter-spacing: .15em; }
@@ -198,6 +249,8 @@
 </style>
 </head>
 <body>
+<div id="monitor">
+<div id="bezel">
 <div id="crt">
   <div id="screen">
     <header>
@@ -220,6 +273,10 @@
   <div class="fx" id="roll"></div>
   <div class="fx" id="glass"></div>
 </div>
+</div>
+<div id="badge" aria-hidden="true"><b>ADDS</b><span>Viewpoint <i>3A+</i></span></div>
+<div id="lamp" aria-hidden="true"></div>
+</div>
 <script>
 (() => {
   const out = document.getElementById('out');
@@ -240,7 +297,8 @@
     clearTimeout(ghostTimer);
     ghostTimer = setTimeout(() => {
       ghostText.textContent = out.textContent;
-      ghostText.style.width = out.clientWidth + 'px';
+      const cs = getComputedStyle(out);   // match the real text's wrap width exactly
+      ghostText.style.width = (out.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) + 'px';
       followScroll();
     }, 120);
   }
