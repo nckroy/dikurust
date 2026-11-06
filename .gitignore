@@ -1,0 +1,8 @@
+/target
+/upstream
+/lib/plrs/*.plr
+/lib/plrs/*.objs
+/lib/ideas
+/lib/typos
+/lib/bugs
+/lib/board.messages

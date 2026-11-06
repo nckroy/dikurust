@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>DikuMUD</title>
+<style>
+  /* P1 green phosphor: one hue, several intensities. */
+  :root {
+    --phos: 120, 255, 140;           /* rgb triplet of the lit phosphor */
+    --text: rgb(var(--phos));
+    --bright: #d8ffd8;               /* overdriven: echo, prompt, title */
+    --dim: rgba(var(--phos), .55);
+    --faint: rgba(var(--phos), .28);
+    --glass: #031407;                /* unlit tube */
+    --case: #0b0c0a;
+    --glow:
+      0 0 1px rgba(var(--phos), .9),
+      0 0 4px rgba(var(--phos), .55),
+      0 0 12px rgba(var(--phos), .28);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--case) radial-gradient(ellipse at 50% 40%, #1a1c18 0%, var(--case) 70%);
+    color: var(--text);
+    font: 16px/1.35 "VT323", "Glass TTY VT220", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    padding: 18px;
+    overflow: hidden;
+  }
+
+  /* ---- the tube ---- */
+  #crt {
+    position: relative; height: 100%;
+    display: flex; flex-direction: column;
+    background: radial-gradient(ellipse at 50% 45%, #062610 0%, var(--glass) 75%);
+    border-radius: 28px / 22px;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 2px #000,
+      0 0 0 14px #181915,
+      0 0 0 15px #2a2b26,
+      0 20px 60px rgba(0, 0, 0, .8);
+    isolation: isolate;
+    animation: power-on .9s cubic-bezier(.2, .8, .2, 1) both;
+  }
+  /* everything that carries an image gets the soft, slightly defocused beam */
+  #screen {
+    position: relative; flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
+    text-shadow: var(--glow);
+    filter: blur(.35px) contrast(1.15) brightness(1.08);
+    animation: flicker 6s infinite steps(1);
+  }
+
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 26px 6px; border-bottom: 1px dashed var(--faint);
+  }
+  header h1 { font-size: 1em; margin: 0; color: var(--bright); letter-spacing: .3em; font-weight: normal; }
+  #status { color: var(--dim); text-transform: uppercase; letter-spacing: .1em; }
+  #status::before { content: "["; } #status::after { content: "]"; }
+  #status.on { color: var(--text); }
+  #status.off { animation: blink 1.1s steps(1) infinite; }
+  header button {
+    margin-left: auto; background: transparent; color: var(--bright);
+    border: 1px solid var(--dim); border-radius: 0; padding: 1px 10px;
+    font: inherit; text-shadow: inherit; text-transform: uppercase; letter-spacing: .1em; cursor: pointer;
+  }
+  header button:hover, header button:focus-visible {
+    background: var(--text); color: var(--glass); text-shadow: none; outline: 0;
+    box-shadow: 0 0 10px rgba(var(--phos), .6);
+  }
+
+  .viewport { position: relative; flex: 1; min-height: 0; }
+  #out, #ghost {
+    position: absolute; inset: 0; margin: 0; padding: 12px 26px;
+    font: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  #out { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--faint) transparent; }
+  #out::-webkit-scrollbar { width: 6px; }
+  #out::-webkit-scrollbar-thumb { background: var(--faint); }
+  #out .echo { color: var(--bright); }
+  #out .sys { color: var(--dim); }
+  #out .new { animation: excite .7s ease-out; }
+  ::selection { background: var(--text); color: var(--glass); text-shadow: none; }
+
+  /* Phosphor persistence: a smeared copy of the text that lags behind
+     the real one when it moves and fades when it is cleared. */
+  #ghost {
+    overflow: hidden; pointer-events: none; user-select: none;
+    color: rgba(var(--phos), .22); text-shadow: 0 0 6px rgba(var(--phos), .5);
+    filter: blur(1.2px);
+    transition: opacity 1.4s ease-out;
+  }
+  #ghost > div { transition: transform .45s cubic-bezier(.1, .7, .3, 1); will-change: transform; }
+  #ghost.cleared { opacity: 0; transition: none; }
+
+  form { display: flex; align-items: baseline; border-top: 1px dashed var(--faint); padding: 0 26px 6px; }
+  #prompt { padding: 8px 0; color: var(--bright); }
+  #in {
+    flex: 1; background: transparent; color: var(--bright); border: 0; outline: 0;
+    font: inherit; text-shadow: inherit; padding: 8px 8px;
+    caret-color: var(--bright); caret-shape: block;
+  }
+
+  /* ---- glass effects, stacked above the image ---- */
+  .fx { position: absolute; inset: 0; pointer-events: none; }
+  /* scanlines: dark gaps between beam lines */
+  #scan {
+    z-index: 2;
+    background: repeating-linear-gradient(to bottom,
+      rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0) 1px, rgba(0, 0, 0, .38) 2px, rgba(0, 0, 0, .38) 3px);
+  }
+  /* interlace: alternate fields drawn on alternate frames */
+  #interlace {
+    z-index: 3;
+    background: repeating-linear-gradient(to bottom,
+      rgba(0, 0, 0, .14) 0, rgba(0, 0, 0, .14) 1px, transparent 1px, transparent 3px);
+    animation: interlace .034s steps(1) infinite;
+  }
+  /* analogue noise */
+  #noise {
+    z-index: 4; opacity: .07; mix-blend-mode: screen;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 1 0 0 0 0 .55 0 0 0 1.6 -.3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    animation: noise .25s steps(4) infinite;
+  }
+  /* the slow bright roll bar of an unsynchronised refresh */
+  #roll {
+    z-index: 5; mix-blend-mode: screen;
+    background: linear-gradient(to bottom, transparent 0%, rgba(var(--phos), .05) 45%, rgba(var(--phos), .09) 50%, rgba(var(--phos), .05) 55%, transparent 100%);
+    height: 22%; top: -22%; bottom: auto;
+    animation: roll 9s linear infinite;
+  }
+  /* curvature: vignette, edge falloff and glare */
+  #glass {
+    z-index: 6; border-radius: inherit;
+    background:
+      radial-gradient(ellipse at 30% 18%, rgba(255, 255, 255, .06) 0%, transparent 35%),
+      radial-gradient(ellipse at 50% 50%, transparent 65%, rgba(0, 0, 0, .4) 100%);
+    box-shadow: inset 0 0 36px 4px rgba(0, 0, 0, .7), inset 0 0 6px 2px rgba(0, 0, 0, .9);
+  }
+
+  /* ---- glitches, toggled from script ---- */
+  #crt.glitch #screen { animation: tear .22s steps(2) 1; }
+  #crt.glitch #screen {
+    text-shadow:
+      -2px 0 rgba(255, 60, 60, .35), 2px 0 rgba(80, 160, 255, .35), var(--glow);
+  }
+  #crt.jolt { animation: jolt .18s steps(3) 1; }
+
+  @keyframes power-on {
+    0%   { transform: scale(1, .004); filter: brightness(8); opacity: .2; }
+    35%  { transform: scale(1, .004); filter: brightness(8); opacity: 1; }
+    60%  { transform: scale(1, 1.04); filter: brightness(2.5); }
+    100% { transform: scale(1, 1); filter: brightness(1); }
+  }
+  @keyframes flicker {
+    0% { opacity: 1; } 7% { opacity: .96; } 8% { opacity: 1; }
+    43% { opacity: .985; } 44% { opacity: 1; } 71% { opacity: .95; } 71.5% { opacity: 1; }
+  }
+  @keyframes interlace { 0% { transform: translateY(0); } 50% { transform: translateY(1px); } }
+  @keyframes noise {
+    0% { background-position: 0 0; } 25% { background-position: -53px 31px; }
+    50% { background-position: 71px -97px; } 75% { background-position: -29px 113px; }
+  }
+  @keyframes roll { to { transform: translateY(560%); } }
+  @keyframes blink { 50% { opacity: .25; } }
+  @keyframes excite {
+    0% { color: #fff; text-shadow: 0 0 2px #fff, 0 0 10px rgba(var(--phos), .9), 0 0 24px rgba(var(--phos), .6); }
+    100% { }
+  }
+  @keyframes tear {
+    0%   { transform: translateX(0) skewX(0); clip-path: inset(0); }
+    25%  { transform: translateX(-6px) skewX(-2deg); clip-path: inset(12% 0 61% 0); }
+    50%  { transform: translateX(4px); clip-path: inset(0); filter: blur(.8px) brightness(1.6); }
+    75%  { transform: translateX(-2px) skewX(1deg); clip-path: inset(48% 0 22% 0); }
+    100% { transform: none; clip-path: inset(0); }
+  }
+  @keyframes jolt {
+    0% { transform: translateY(0); } 33% { transform: translateY(-3px) scaleY(1.01); }
+    66% { transform: translateY(2px); } 100% { transform: none; }
+  }
+
+  @media (max-width: 600px) {
+    body { padding: 6px; font-size: 14px; }
+    #crt { border-radius: 14px / 10px; box-shadow: 0 0 0 2px #000, 0 0 0 6px #181915; }
+    header, form { padding-left: 16px; padding-right: 16px; }
+    #out, #ghost { padding: 10px 16px; }
+    header h1 { letter-spacing: .15em; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #crt, #screen, #interlace, #noise, #roll, #status.off, #out .new { animation: none !important; }
+    #roll { display: none; }
+    #ghost > div { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div id="crt">
+  <div id="screen">
+    <header>
+      <h1>DIKUMUD</h1>
+      <span id="status" class="off">connecting</span>
+      <button id="reconnect" type="button" hidden>Reconnect</button>
+    </header>
+    <div class="viewport">
+      <div id="ghost" aria-hidden="true"><div></div></div>
+      <pre id="out" aria-live="polite"></pre>
+    </div>
+    <form id="f" autocomplete="off">
+      <span id="prompt">&gt;</span>
+      <input id="in" autofocus spellcheck="false" autocapitalize="off" autocorrect="off" aria-label="Command">
+    </form>
+  </div>
+  <div class="fx" id="scan"></div>
+  <div class="fx" id="interlace"></div>
+  <div class="fx" id="noise"></div>
+  <div class="fx" id="roll"></div>
+  <div class="fx" id="glass"></div>
+</div>
+<script>
+(() => {
+  const out = document.getElementById('out');
+  const ghost = document.getElementById('ghost');
+  const ghostText = ghost.firstElementChild;
+  const input = document.getElementById('in');
+  const status = document.getElementById('status');
+  const again = document.getElementById('reconnect');
+  const crt = document.getElementById('crt');
+  const MAX_CHARS = 400000;
+  const calm = matchMedia('(prefers-reduced-motion: reduce)');
+  let ws = null, echo = true, history = [], hpos = 0;
+
+  // ---- phosphor persistence ----
+  let ghostTimer = 0;
+  function syncGhost() {
+    // Copy text after a beat so freshly drawn lines don't double up while bright.
+    clearTimeout(ghostTimer);
+    ghostTimer = setTimeout(() => {
+      ghostText.textContent = out.textContent;
+      ghostText.style.width = out.clientWidth + 'px';
+      followScroll();
+    }, 120);
+  }
+  function followScroll() { ghostText.style.transform = 'translateY(' + (-out.scrollTop) + 'px)'; }
+  out.addEventListener('scroll', followScroll, { passive: true });
+  function clearScreen() {
+    out.textContent = '';
+    ghost.classList.add('cleared');           // jump the afterimage to full brightness…
+    ghost.offsetWidth;
+    ghost.classList.remove('cleared');
+    ghost.style.opacity = '0';                // …then let it decay
+    setTimeout(() => { ghostText.textContent = ''; ghost.style.opacity = ''; }, 1500);
+  }
+
+  function atBottom() { return out.scrollHeight - out.scrollTop - out.clientHeight < 40; }
+  function append(text, cls) {
+    const stick = atBottom();
+    const s = document.createElement('span');
+    s.className = (cls ? cls + ' ' : '') + 'new';
+    s.textContent = text;
+    s.addEventListener('animationend', () => s.classList.remove('new'), { once: true });
+    out.appendChild(s);
+    while (out.textContent.length > MAX_CHARS && out.firstChild) out.removeChild(out.firstChild);
+    if (stick) out.scrollTop = out.scrollHeight;
+    syncGhost();
+    if (text.length > 600 && Math.random() < .5) glitch('jolt', 180);
+  }
+  function setEcho(on) {
+    echo = on;
+    input.type = on ? 'text' : 'password';
+    input.value = '';
+  }
+
+  // ---- glitches ----
+  function glitch(kind, ms) {
+    if (calm.matches || crt.classList.contains(kind)) return;
+    crt.classList.add(kind);
+    setTimeout(() => crt.classList.remove(kind), ms);
+  }
+  (function scheduleGlitch() {
+    setTimeout(() => {
+      glitch(Math.random() < .7 ? 'glitch' : 'jolt', 160 + Math.random() * 160);
+      scheduleGlitch();
+    }, 5000 + Math.random() * 14000);
+  })();
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+    status.textContent = 'connecting'; status.className = 'off'; again.hidden = true;
+    ws.onopen = () => { status.textContent = 'carrier'; status.className = 'on'; input.focus(); };
+    ws.onmessage = ev => {
+      let m;
+      try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.t === 'o') append(m.d.replace(/\r/g, ''));
+      else if (m.t === 'echo') setEcho(m.v);
+    };
+    ws.onclose = () => {
+      status.textContent = 'no carrier'; status.className = 'off';
+      append('\n[connection closed]\n', 'sys');
+      glitch('glitch', 300);
+      again.hidden = false; setEcho(true);
+    };
+  }
+  document.getElementById('f').addEventListener('submit', e => {
+    e.preventDefault();
+    const line = input.value;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(line);
+    if (echo) {
+      append(line + '\n', 'echo');
+      if (line && history[history.length - 1] !== line) history.push(line);
+      if (history.length > 200) history.shift();
+    } else {
+      append('\n');
+    }
+    hpos = history.length;
+    input.value = '';
+    out.scrollTop = out.scrollHeight;
+  });
+  input.addEventListener('keydown', e => {
+    if (!echo) return;
+    if (e.key === 'ArrowUp' && hpos > 0) { input.value = history[--hpos]; e.preventDefault(); }
+    else if (e.key === 'ArrowDown') {
+      hpos = Math.min(history.length, hpos + 1);
+      input.value = history[hpos] || ''; e.preventDefault();
+    }
+  });
+  out.addEventListener('click', () => { if (!getSelection().toString()) input.focus(); });
+  again.addEventListener('click', () => { clearScreen(); connect(); });
+  addEventListener('resize', syncGhost);
+  connect();
+})();
+</script>
+</body>
+</html>

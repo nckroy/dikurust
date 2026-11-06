@@ -1,0 +1,17 @@
+[package]
+name = "dikumud"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "DikuMUD I (Gamma 0.0) ported from C to Rust"
+license-file = "doc/license.doc"
+publish = false
+
+[[bin]]
+name = "dmserver"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+debug = 1

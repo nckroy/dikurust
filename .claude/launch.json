@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "dmserver", "runtimeExecutable": "cargo", "runtimeArgs": ["run", "--release", "--", "4100"], "port": 4100 }
+  ]
+}
