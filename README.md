@@ -1,6 +1,6 @@
 # DikuMUD in Rust
 
-![DikuMUD running in the web client, styled as a green-phosphor ADDS Viewpoint 3A+ terminal, showing a walk from the Temple Square to the Market Square of Midgaard and the score command](web/screenshot.png)
+![DikuMUD in the web client, styled as a green-phosphor ADDS Viewpoint 3A+ terminal logged in to umaxc.weeg.uiowa.edu: a walk to the Market Square of Midgaard, the score command, then ^] and close back to the C shell prompt](web/screenshot.png)
 
 A port of **DikuMUD I (Gamma 0.0)**, the 1990–91 multi-user dungeon from
 DIKU (University of Copenhagen), from C to Rust. You play it in a web browser
@@ -25,7 +25,9 @@ it automatically. There are no third-party crates.
 cargo run --release
 ```
 
-Then open <http://127.0.0.1:4000/> in a browser.
+Then open <http://127.0.0.1:4000/> in a browser. The page starts at a C shell
+prompt on `umaxc.weeg.uiowa.edu`; type `telnet mud` to connect to the game.
+Press `^]` (Ctrl+]) for the `telnet>` prompt, where `close` ends the session.
 
 ```
 dmserver [-s] [-d <data dir>] [-b <bind address>] [port]
@@ -96,8 +98,10 @@ game plays the same.
   web client (`web/index.html`, built into the binary) and speaks WebSocket at
   `/ws`. The client masks the password field and keeps command history (up and
   down arrows). It is styled as a green-phosphor CRT terminal; the flicker and
-  glitch effects switch off when the system asks for reduced motion. Telnet is
-  no longer supported.
+  glitch effects switch off when the system asks for reduced motion. The page
+  opens on a simulated C shell (`ls`, `cd`, `echo`, `who`, `history`, `!!`,
+  …) and only connects to the game when you run `telnet mud`; that shell and
+  telnet live entirely in the browser. Real telnet clients are not supported.
 - **Portable save files.** The binary `players` and `pcobjs.obj` files held
   raw C structs. They are now one text file per player in `lib/plrs/`:
   `name.plr` for the character and `name.objs` for items stored at an inn. The

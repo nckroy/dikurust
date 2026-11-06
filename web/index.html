@@ -104,20 +104,8 @@
     display: flex; align-items: center; gap: 14px;
     padding: 10px 26px 6px; border-bottom: 1px dashed var(--faint);
   }
-  header h1 { font-size: 1em; margin: 0; color: var(--bright); letter-spacing: .3em; font-weight: normal; }
-  #status { color: var(--dim); text-transform: uppercase; letter-spacing: .1em; }
-  #status::before { content: "["; } #status::after { content: "]"; }
-  #status.on { color: var(--text); }
-  #status.off { animation: blink 1.1s steps(1) infinite; }
-  header button {
-    margin-left: auto; background: transparent; color: var(--bright);
-    border: 1px solid var(--dim); border-radius: 0; padding: 1px 10px;
-    font: inherit; text-shadow: inherit; text-transform: uppercase; letter-spacing: .1em; cursor: pointer;
-  }
-  header button:hover, header button:focus-visible {
-    background: var(--text); color: var(--glass); text-shadow: none; outline: 0;
-    box-shadow: 0 0 10px rgba(var(--phos), .6);
-  }
+  header h1 { font-size: 1em; margin: 0; color: var(--bright); letter-spacing: .08em; font-weight: normal; }
+  #tty { margin-left: auto; color: var(--dim); }
 
   .viewport { position: relative; flex: 1; min-height: 0; }
   #out, #ghost {
@@ -244,7 +232,7 @@
     header h1 { letter-spacing: .15em; }
   }
   @media (prefers-reduced-motion: reduce) {
-    #crt, #screen, #interlace, #noise, #roll, #status.off, #out .new { animation: none !important; }
+    #crt, #screen, #interlace, #noise, #roll, #out .new { animation: none !important; }
     #roll { display: none; }
     #ghost > div { transition: none; }
   }
@@ -256,9 +244,8 @@
 <div id="crt">
   <div id="screen">
     <header>
-      <h1>DIKUMUD</h1>
-      <span id="status" class="off">connecting</span>
-      <button id="reconnect" type="button" hidden>Reconnect</button>
+      <h1>umaxc.weeg.uiowa.edu</h1>
+      <span id="tty">ttyp3</span>
     </header>
     <div class="viewport">
       <div id="ghost" aria-hidden="true"><div></div></div>
@@ -291,8 +278,6 @@
   const ghost = document.getElementById('ghost');
   const ghostText = ghost.firstElementChild;
   const input = document.getElementById('in');
-  const status = document.getElementById('status');
-  const again = document.getElementById('reconnect');
   const crt = document.getElementById('crt');
   const MAX_CHARS = 400000;
   const calm = matchMedia('(prefers-reduced-motion: reduce)');
@@ -389,11 +374,168 @@
   every(45e3, 200e3, ripple);           // every 45–200 seconds
   window.crtFx = { blank, ripple };     // for trying the effects from devtools
 
+  // ---- the host: a C shell on umaxc, with telnet as the way into the MUD ----
+  const HOST = 'umaxc', FQDN = 'umaxc.weeg.uiowa.edu', USER = 'guest', HOME = '/usr/guest';
+  const MUD = { names: ['mud', 'mud.weeg.uiowa.edu'], addr: '128.255.44.21', port: 4000 };
+  const FILES = {
+    '/usr/guest': ['.cshrc', '.login', '.plan', 'mbox', 'notes'],
+    '/usr/guest/notes': ['diku-maps', 'todo'],
+  };
+  // 'sh' at the C shell, 'cmd' at the telnet> prompt, 'mud' when connected
+  let mode = 'sh', cwd = HOME, shHist = [], closing = false;
+
+  const fmtDate = (d = new Date()) => {
+    const p = n => String(n).padStart(2, '0');
+    const day = d.toLocaleString('en-US', { weekday: 'short' });
+    const mon = d.toLocaleString('en-US', { month: 'short' });
+    return `${day} ${mon} ${String(d.getDate()).padStart(2, ' ')} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())} CST ${d.getFullYear()}`;
+  };
+  const shPrompt = () => append(`${HOST}% `);
+  const tnPrompt = () => append('telnet> ');
+
+  function banner() {
+    const last = new Date(Date.now() - 26 * 3600e3 - Math.random() * 40 * 3600e3);
+    append(
+`\nUMAX V Release 2.4 (${FQDN}) (ttyp3)\n\n` +
+`login: ${USER}\n` +
+`Last login: ${fmtDate(last)} from weeg-ts2\n` +
+`University of Iowa -- Weeg Computing Center -- Encore Multimax\n\n` +
+`  * DikuMUD is running on host "mud".  To play:  telnet mud\n` +
+`  * Escape from telnet with ^] (control-right-bracket).\n\n`);
+    mode = 'sh'; cwd = HOME;
+    shPrompt();
+  }
+
+  function resolve(path) {
+    if (!path || path === '~') return HOME;
+    if (path.startsWith('~/')) path = HOME + path.slice(1);
+    if (!path.startsWith('/')) path = cwd + '/' + path;
+    const parts = [];
+    for (const seg of path.split('/')) {
+      if (!seg || seg === '.') continue;
+      if (seg === '..') parts.pop(); else parts.push(seg);
+    }
+    return '/' + parts.join('/');
+  }
+
+  // returns false when the command takes over the screen (telnet) and prints its own prompt
+  function runShell(line) {
+    const words = line.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return true;
+    const [cmd, ...args] = words;
+    const say = t => append(t + '\n');
+    switch (cmd) {
+      case 'telnet':
+        if (!args.length) { mode = 'cmd'; tnPrompt(); return false; }
+        return telnetOpen(args[0], args[1]);
+      case 'echo': say(args.join(' ').replace(/\$HOME/g, HOME).replace(/\$USER/g, USER)); break;
+      case 'pwd': say(cwd); break;
+      case 'cd': {
+        const to = resolve(args[0]);
+        if (FILES[to]) cwd = to; else say(`${args[0]}: No such file or directory.`);
+        break;
+      }
+      case 'ls': {
+        const all = args.includes('-a') || args.includes('-la') || args.includes('-al');
+        const target = resolve(args.find(a => !a.startsWith('-')) || '.');
+        const list = FILES[target];
+        if (!list) { say(`${args.find(a => !a.startsWith('-'))} not found`); break; }
+        const shown = all ? ['.', '..', ...list] : list.filter(f => !f.startsWith('.'));
+        say(shown.join('  '));
+        break;
+      }
+      case 'cat': {
+        const f = args[0];
+        if (f === '.plan' && cwd === HOME) say('Mapping the sewers under Midgaard.  Again.');
+        else if (f === 'todo' && cwd === HOME + '/notes') say('- find the cityguard captain\n- buy a lantern');
+        else say(`${f || 'cat'}: ${f ? 'Permission denied' : 'Usage: cat file'}.`);
+        break;
+      }
+      case 'whoami': say(USER); break;
+      case 'hostname': say(FQDN); break;
+      case 'uname': say(args.includes('-a') ? `UMAX ${HOST} 2.4 V Multimax` : 'UMAX'); break;
+      case 'date': say(fmtDate()); break;
+      case 'who':
+        say(`${USER.padEnd(9)}ttyp3   ${fmtDate().slice(4, 16)}   (weeg-ts2)`);
+        say(`root     console ${fmtDate(new Date(Date.now() - 9 * 86400e3)).slice(4, 16)}`);
+        break;
+      case 'history':
+        shHist.forEach((h, i) => say(String(i + 1).padStart(6) + '  ' + h));
+        break;
+      case 'clear': clearScreen(); break;
+      case 'logout': case 'exit': case 'login':
+        say('logout'); setTimeout(banner, 600); return false;
+      case 'rlogin': case 'ftp': case 'rsh':
+        say(`${cmd}: ${args[0] || ''}: Network is unreachable`); break;
+      default: say(`${cmd}: Command not found.`);
+    }
+    return true;
+  }
+
+  function telnetOpen(host, port) {
+    if (!host) { append('usage: open host-name [port]\n'); return true; }
+    const known = MUD.names.includes(host) || host === MUD.addr;
+    if (!known) {
+      append(`${host}: unknown host\n`);
+      return true;
+    }
+    if (port && port !== String(MUD.port) && port !== 'telnet' && port !== '23') {
+      append(`Trying ${MUD.addr}...\ntelnet: Unable to connect to remote host: Connection refused\n`);
+      return true;
+    }
+    append(`Trying ${MUD.addr}...\n`);
+    mode = 'connecting';
+    setTimeout(connect, 350 + Math.random() * 500);
+    return false;
+  }
+
+  function backToShell(msg) {
+    ws = null; closing = false;
+    setEcho(true);
+    if (msg) append(msg + '\n');
+    mode = 'sh'; shPrompt();
+  }
+
+  function runTelnetCmd(line) {
+    const [cmd, ...args] = line.trim().split(/\s+/);
+    const live = ws && ws.readyState === WebSocket.OPEN;
+    if (!cmd) { if (live) { mode = 'mud'; return; } tnPrompt(); return; }
+    if (/^(close|c|quit|q)$/.test(cmd)) {
+      if (live) { closing = true; ws.close(); return; }       // onclose prints and returns to csh
+      if (/^q/.test(cmd)) { mode = 'sh'; shPrompt(); return; }
+      append('?Need to be connected first.\n'); tnPrompt(); return;
+    }
+    if (/^(open|o)$/.test(cmd)) {
+      if (live) { append(`?Already connected to ${MUD.names[0]}\n`); tnPrompt(); return; }
+      if (!telnetOpen(args[0], args[1])) return;
+      tnPrompt(); return;
+    }
+    if (/^(status|st)$/.test(cmd)) {
+      append(live ? `Connected to ${MUD.names[0]}.\nEscape character is '^]'.\n` : 'No connection.\nEscape character is \'^]\'.\n');
+      if (live) { mode = 'mud'; return; }
+      tnPrompt(); return;
+    }
+    if (cmd === '?' || cmd === 'help') {
+      append('Commands may be abbreviated.  Commands are:\n\n' +
+        'close           close current connection\n' +
+        'open            connect to a site\n' +
+        'quit            exit telnet\n' +
+        'status          print status information\n' +
+        '?               print help information\n');
+      tnPrompt(); return;
+    }
+    append('?Invalid command\n'); tnPrompt();
+  }
+
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let opened = false;
     ws = new WebSocket(proto + '//' + location.host + '/ws');
-    status.textContent = 'connecting'; status.className = 'off'; again.hidden = true;
-    ws.onopen = () => { status.textContent = 'carrier'; status.className = 'on'; input.focus(); };
+    ws.onopen = () => {
+      opened = true; mode = 'mud';
+      append(`Connected to ${MUD.names[0]}.\nEscape character is '^]'.\n`);
+      input.focus();
+    };
     ws.onmessage = ev => {
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
@@ -401,16 +543,20 @@
       else if (m.t === 'echo') setEcho(m.v);
     };
     ws.onclose = () => {
-      status.textContent = 'no carrier'; status.className = 'off';
-      append('\n[connection closed]\n', 'sys');
-      again.hidden = false; setEcho(true);
+      if (!opened) return backToShell(`telnet: Unable to connect to remote host: Connection refused`);
+      backToShell(closing ? 'Connection closed.' : '\nConnection closed by foreign host.');
     };
   }
+
   document.getElementById('f').addEventListener('submit', e => {
     e.preventDefault();
     const line = input.value;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(line);
+    input.value = '';
+    if (mode === 'connecting') return;
+    if (mode === 'mud') {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(line);
+    }
     if (echo) {
       append(line + '\n', 'echo');
       if (line && history[history.length - 1] !== line) history.push(line);
@@ -419,10 +565,36 @@
       append('\n');
     }
     hpos = history.length;
-    input.value = '';
     out.scrollTop = out.scrollHeight;
+
+    if (mode === 'sh') {
+      let cmdline = line;
+      // csh history substitution: !! and !n
+      if (/^!(!|\d+)/.test(cmdline.trim())) {
+        const ref = cmdline.trim().slice(1);
+        const prev = ref.startsWith('!') ? shHist[shHist.length - 1] : shHist[parseInt(ref, 10) - 1];
+        if (!prev) { append(`${ref.startsWith('!') ? '!' : ref}: Event not found.\n`); shPrompt(); return; }
+        cmdline = prev + ref.replace(/^(!|\d+)/, '');
+        append(cmdline + '\n');
+      }
+      if (cmdline.trim()) shHist.push(cmdline.trim());
+      if (runShell(cmdline)) shPrompt();
+    } else if (mode === 'cmd') {
+      runTelnetCmd(line);
+    }
   });
+
   input.addEventListener('keydown', e => {
+    // ^] : telnet escape
+    if (e.ctrlKey && (e.key === ']' || e.code === 'BracketRight')) {
+      e.preventDefault();
+      if (mode === 'mud') { append('^]\n'); mode = 'cmd'; setEcho(true); tnPrompt(); }
+      return;
+    }
+    // ^C at the shell: abandon the line
+    if (e.ctrlKey && e.key === 'c' && mode === 'sh' && !getSelection().toString()) {
+      e.preventDefault(); append(input.value + '^C\n'); input.value = ''; shPrompt(); return;
+    }
     if (!echo) return;
     if (e.key === 'ArrowUp' && hpos > 0) { input.value = history[--hpos]; e.preventDefault(); }
     else if (e.key === 'ArrowDown') {
@@ -431,9 +603,8 @@
     }
   });
   out.addEventListener('click', () => { if (!getSelection().toString()) input.focus(); });
-  again.addEventListener('click', () => { clearScreen(); connect(); });
   addEventListener('resize', syncGhost);
-  connect();
+  banner();
 })();
 </script>
 </body>
