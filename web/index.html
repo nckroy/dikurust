@@ -396,10 +396,10 @@
   function banner() {
     const last = new Date(Date.now() - 26 * 3600e3 - Math.random() * 40 * 3600e3);
     append(
-`\nUMAX V Release 2.4 (${FQDN}) (ttyp3)\n\n` +
+`\nEncore Multimax BSD 4.3 (${FQDN}) (ttyp3)\n\n` +
 `login: ${USER}\n` +
 `Last login: ${fmtDate(last)} from weeg-ts2\n` +
-`University of Iowa -- Weeg Computing Center -- Encore Multimax\n\n` +
+`University of Iowa -- Weeg Computing Center\n\n` +
 `  * DikuMUD is running on host "mud".  To play:  telnet mud\n` +
 `  * Escape from telnet with ^] (control-right-bracket).\n\n`);
     mode = 'sh'; cwd = HOME;
@@ -453,7 +453,7 @@
       }
       case 'whoami': say(USER); break;
       case 'hostname': say(FQDN); break;
-      case 'uname': say(args.includes('-a') ? `UMAX ${HOST} 2.4 V Multimax` : 'UMAX'); break;
+      case 'uname': say(args.includes('-a') ? `BSD ${HOST} 4.3 Encore Multimax` : 'BSD'); break;
       case 'date': say(fmtDate()); break;
       case 'who':
         say(`${USER.padEnd(9)}ttyp3   ${fmtDate().slice(4, 16)}   (weeg-ts2)`);
