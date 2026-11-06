@@ -1,5 +1,7 @@
 # DikuMUD in Rust
 
+![DikuMUD running in the web client, styled as a green-phosphor ADDS Viewpoint 3A+ terminal, showing a walk from the Temple Square to the Market Square of Midgaard and the score command](web/screenshot.png)
+
 A port of **DikuMUD I (Gamma 0.0)**, the 1990–91 multi-user dungeon from
 DIKU (University of Copenhagen), from C to Rust. You play it in a web browser
 instead of over telnet.
