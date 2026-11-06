@@ -188,13 +188,15 @@
     box-shadow: inset 0 0 36px 4px rgba(0, 0, 0, .7), inset 0 0 6px 2px rgba(0, 0, 0, .9);
   }
 
-  /* ---- glitches, toggled from script ---- */
-  #crt.glitch #screen { animation: tear .22s steps(2) 1; }
-  #crt.glitch #screen {
+  /* ---- glitches, toggled from script ----
+     .blank: rare (≈20 min) sync loss: the picture tears, jolts and drops out.
+     The quieter ripple/fuzz is an SVG displacement filter driven from script. */
+  #crt.blank { animation: jolt .18s steps(3) 1; }
+  #crt.blank #screen {
+    animation: tear .3s steps(2) 1;
     text-shadow:
       -2px 0 rgba(255, 60, 60, .35), 2px 0 rgba(80, 160, 255, .35), var(--glow);
   }
-  #crt.jolt { animation: jolt .18s steps(3) 1; }
 
   @keyframes power-on {
     0%   { transform: scale(1, .004); filter: brightness(8); opacity: .2; }
@@ -274,6 +276,12 @@
   <div class="fx" id="glass"></div>
 </div>
 </div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <filter id="ripple" x="-2%" y="-2%" width="104%" height="104%" color-interpolation-filters="sRGB">
+    <feTurbulence id="rip-noise" type="fractalNoise" baseFrequency="0.002 0.05" numOctaves="2" seed="1" result="n"/>
+    <feDisplacementMap id="rip-map" in="SourceGraphic" in2="n" scale="0" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</svg>
 <div id="badge" aria-hidden="true"><b>ADDS</b><span>Viewpoint <i>3A+</i></span></div>
 <div id="lamp" aria-hidden="true"></div>
 </div>
@@ -324,7 +332,6 @@
     while (out.textContent.length > MAX_CHARS && out.firstChild) out.removeChild(out.firstChild);
     if (stick) out.scrollTop = out.scrollHeight;
     syncGhost();
-    if (text.length > 600 && Math.random() < .5) glitch('jolt', 180);
   }
   function setEcho(on) {
     echo = on;
@@ -333,17 +340,54 @@
   }
 
   // ---- glitches ----
-  function glitch(kind, ms) {
-    if (calm.matches || crt.classList.contains(kind)) return;
-    crt.classList.add(kind);
-    setTimeout(() => crt.classList.remove(kind), ms);
+  const screen = document.getElementById('screen');
+  const ripNoise = document.getElementById('rip-noise');
+  const ripMap = document.getElementById('rip-map');
+  const rand = (a, b) => a + Math.random() * (b - a);
+  function every(minMs, maxMs, fn) {
+    (function next() { setTimeout(() => { fn(); next(); }, rand(minMs, maxMs)); })();
   }
-  (function scheduleGlitch() {
-    setTimeout(() => {
-      glitch(Math.random() < .7 ? 'glitch' : 'jolt', 160 + Math.random() * 160);
-      scheduleGlitch();
-    }, 5000 + Math.random() * 14000);
-  })();
+
+  // Rare: the set loses sync and the picture drops out for a moment.
+  function blank() {
+    if (calm.matches || crt.classList.contains('blank')) return;
+    crt.classList.add('blank');
+    setTimeout(() => crt.classList.remove('blank'), 300);
+  }
+
+  // Frequent but faint: text wobbles sideways in bands and/or breaks into
+  // grain, then settles back together. Rises quickly, decays slowly.
+  let rippling = false;
+  function ripple() {
+    if (calm.matches || rippling || document.hidden) return;
+    rippling = true;
+    const mode = ['wave', 'fuzz', 'both'][Math.floor(Math.random() * 3)];
+    const dur = rand(900, 1700);
+    const peak = mode === 'fuzz' ? rand(3, 5) : rand(4, 7);
+    const fy = rand(.03, .07);
+    let seed = Math.floor(rand(1, 1000)), t0 = 0, frame = 0;
+    function step(now) {
+      if (!t0) t0 = now;
+      const t = Math.min(1, (now - t0) / dur);
+      const env = Math.sin(Math.PI * Math.pow(t, .6)) ** 2;          // 0 → 1 → 0
+      const fuzzing = mode === 'fuzz' || (mode === 'both' && t > .35);
+      if (fuzzing) {
+        if (frame++ % 2 === 0) ripNoise.setAttribute('seed', ++seed); // crackle
+        ripNoise.setAttribute('baseFrequency', '0.7 0.9');
+      } else {
+        ripNoise.setAttribute('baseFrequency', '0.002 ' + (fy + .02 * Math.sin(t * 9)).toFixed(4));
+      }
+      ripMap.setAttribute('scale', (peak * env).toFixed(2));
+      screen.style.filter = 'url(#ripple) blur(' + (fuzzing ? .5 * env : .15 * env).toFixed(2) + 'px) contrast(1.1) brightness(1.05)';
+      if (t < 1) requestAnimationFrame(step);
+      else { screen.style.filter = ''; ripMap.setAttribute('scale', '0'); rippling = false; }
+    }
+    requestAnimationFrame(step);
+  }
+
+  every(15 * 60e3, 25 * 60e3, blank);   // about once every 20 minutes
+  every(45e3, 200e3, ripple);           // every 45–200 seconds
+  window.crtFx = { blank, ripple };     // for trying the effects from devtools
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -359,7 +403,6 @@
     ws.onclose = () => {
       status.textContent = 'no carrier'; status.className = 'off';
       append('\n[connection closed]\n', 'sys');
-      glitch('glitch', 300);
       again.hidden = false; setEcho(true);
     };
   }
