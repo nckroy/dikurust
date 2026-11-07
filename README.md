@@ -48,6 +48,14 @@ There is no TLS. For play over the internet, put it behind a reverse proxy
 that terminates HTTPS and forwards WebSocket upgrades (Caddy or nginx). The
 client switches to `wss://` automatically when it is served over HTTPS.
 
+### Monitoring
+
+`GET /status` returns JSON about the running game: up, uptime, players
+online, wizlock, game time and weather. It needs no login and names nobody.
+Immortals can see much more from their phone with the **Diku Wizard** iOS
+app in [`ios/`](ios/README.md), which logs in as your character and wraps
+the wizard commands. See [§5.5 of the wizard's guide](doc/WIZARDS.md#55-monitoring-and-the-diku-wizard-app).
+
 ### In a container
 
 The `Dockerfile` builds a small Debian image that runs the server as an

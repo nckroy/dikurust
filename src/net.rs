@@ -296,9 +296,33 @@ fn handle_http(w: &mut World, c: &mut Conn) {
             c.desc = Some(did);
             log(&format!("New connection from {}.", c.peer));
         }
+        ("/status", false, _) => {
+            let body = crate::admin::status_json(w);
+            http_response(c, "200 OK", "application/json", &body)
+        }
         ("/" | "/index.html", _, _) => http_response(c, "200 OK", "text/html; charset=utf-8", INDEX_HTML),
         _ => http_response(c, "404 Not Found", "text/plain", "not found"),
     }
+}
+
+/// An out-of-band request from a client (see `admin.rs`).  Only immortals
+/// who are logged in and playing get an answer.
+fn handle_oob(w: &World, c: &mut Conn, req: &str) {
+    let level = c
+        .desc
+        .and_then(|did| w.desc(did))
+        .filter(|d| d.connected == CON_PLYNG)
+        .and_then(|d| d.original.or(d.character))
+        .filter(|&ch| w.ch_exists(ch) && !w.is_npc(ch))
+        .map(|ch| w.level(ch));
+    let reply = match (req.trim(), level) {
+        ("snap", Some(l)) if l >= crate::admin::LEVEL_IMMORTAL => {
+            format!("{{\"t\":\"wiz\",\"d\":{}}}", crate::admin::snapshot_json(w, l))
+        }
+        ("snap", _) => "{\"t\":\"wiz\",\"err\":\"Only immortals who are in the game can ask for this.\"}".to_string(),
+        _ => "{\"t\":\"wiz\",\"err\":\"Unknown request.\"}".to_string(),
+    };
+    ws_send_text(c, &reply);
 }
 
 /// Parse complete WebSocket frames in `inbuf`.  Returns text messages.
@@ -629,6 +653,10 @@ pub fn game_loop(w: &mut World, srv: &mut Server) {
             }
             if c.kind == Kind::Ws {
                 for msg in parse_ws(c) {
+                    if msg.starts_with(crate::admin::OOB) {
+                        handle_oob(w, c, &msg[1..]);
+                        continue;
+                    }
                     if let Some(did) = c.desc {
                         for line in msg.split('\n') {
                             let line = line.trim_end_matches('\r');
