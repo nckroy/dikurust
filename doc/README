@@ -28,6 +28,8 @@ SPELL_INFO.DOC    - Doc on spells, especially how damage is calculated
 SPELLS.DOC        - Out of date
 TIME.DOC          - How time is in DikuMud compared to real world.
 VALUES.DOC        - The 4 generic values for items, described in detail.
+PLAYING.md        - Playthrough guide for mortals: classes, Midgaard,
+                    survival, renting, leveling and areas by level.
 WIZARDS.md        - Guide for immortals and builders on the Rust port:
                     commands, levels, file formats, resets, shops and
                     special procedures. Current with the code.
