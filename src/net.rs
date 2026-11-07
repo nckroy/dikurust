@@ -8,7 +8,19 @@
 //! Wire protocol (server -> browser), one JSON object per text frame:
 //!   {"t":"o","d":"<text>"}      game output (with the original "\n\r")
 //!   {"t":"echo","v":false}       hide input (password prompt) / show again
+//!   {"t":"resume","k":"<token>"} once playing: a one-use token for resuming
+//!                                (null when the player leaves the game)
+//!   {"t":"resume","ok":true}     answer to a resume attempt (false: log in)
+//!   {"t":"bye"}                  the game closed the link (quit etc.); the
+//!                                client should not try to resume
 //! Browser -> server: each text frame is one or more input lines.
+//!
+//! Resuming: mobile browsers (iPadOS Safari especially) drop WebSockets
+//! when a tab goes into the background.  The character stays in the game
+//! link-dead, as with any lost link.  A client holding a resume token opens
+//! `/ws?resume` and sends the token as its first frame; on success the new
+//! connection takes over the character without asking for the password,
+//! closing any old connection the server still thinks is alive.
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -19,12 +31,15 @@ use crate::comm::*;
 use crate::game::World;
 use crate::handler::*;
 use crate::structs::*;
-use crate::utils::log;
+use crate::utils::{log, str_cmp};
 
 const OPT_USEC: u64 = 250_000; // 4 pulses per second, as in the original
 const MAX_HTTP_HEADER: usize = 16 * 1024;
 const MAX_WS_PAYLOAD: usize = 64 * 1024;
 const MAX_CONNECTIONS: usize = 256;
+/// A resume token is good for this long after it was issued.  The game's
+/// own idle timers (the void, then extraction) usually end things sooner.
+const RESUME_TTL: Duration = Duration::from_secs(24 * 3600);
 
 pub static INDEX_HTML: &str = include_str!("../web/index.html");
 
@@ -45,6 +60,10 @@ struct Conn {
     dead: bool,
     frag: Vec<u8>,
     echo_sent: bool,
+    /// opened as /ws?resume: the first frame is a resume token
+    awaiting_resume: bool,
+    /// the resume token this connection holds while its character plays
+    token: Option<String>,
 }
 
 pub struct Server {
@@ -67,7 +86,7 @@ impl Server {
 /* game-side descriptor handling                                       */
 /* ------------------------------------------------------------------ */
 
-fn new_descriptor(w: &mut World, host: String) -> DescId {
+fn new_descriptor(w: &mut World, host: String, greet: bool) -> DescId {
     let id = w.next_desc_id;
     w.next_desc_id += 1;
     let d = Descriptor {
@@ -90,9 +109,74 @@ fn new_descriptor(w: &mut World, host: String) -> DescId {
         echo: true,
     };
     w.descriptors.insert(0, d);
+    if greet {
+        greet_descriptor(w, id);
+    }
+    id
+}
+
+fn greet_descriptor(w: &mut World, id: DescId) {
     write_to_q(w, id, crate::db::GREETINGS);
     write_to_q(w, id, "By what name do you wish to be known? ");
-    id
+}
+
+/// Issue a fresh resume token for `name`, replacing any older one.
+fn issue_resume_token(w: &mut World, name: &str) -> String {
+    let now = Instant::now();
+    w.resume_tokens
+        .retain(|_, (n, at)| str_cmp(n, name) != 0 && now.duration_since(*at) < RESUME_TTL);
+    let token = crate::crypto::random_token();
+    w.resume_tokens.insert(token.clone(), (name.to_string(), now));
+    token
+}
+
+/// Attach a fresh descriptor to the player a resume token names.  The token
+/// is used up either way.  Returns false if it is unknown, expired, or the
+/// character is no longer in the game; the caller then greets as usual.
+fn try_resume(w: &mut World, did: DescId, token: &str) -> bool {
+    let Some((name, at)) = w.resume_tokens.remove(token.trim()) else { return false };
+    if at.elapsed() >= RESUME_TTL {
+        return false;
+    }
+    let Some(ch) = w
+        .character_list
+        .iter()
+        .copied()
+        .find(|&t| !w.is_npc(t) && str_cmp(&name, &w[t].player.name) == 0)
+    else {
+        return false;
+    };
+    // save_char() writes the descriptor's password hash into the player
+    // file, so the new descriptor needs it as if the player had typed it.
+    let Some(pwd) = crate::save::load_char(w, &name).map(|st| st.pwd).filter(|p| !p.is_empty()) else {
+        return false;
+    };
+    // The old connection may still look alive to us (a suspended tab
+    // rarely says goodbye).  Drop it so the character is link-dead.
+    let old: Vec<DescId> = w
+        .descriptors
+        .iter()
+        .filter(|d| d.id != did && (d.character == Some(ch) || d.original == Some(ch)))
+        .map(|d| d.id)
+        .collect();
+    for od in old {
+        close_socket(w, od);
+    }
+    w[ch].desc = Some(did);
+    w[ch].specials.timer = 0;
+    let host = match w.desc_mut(did) {
+        Some(d) => {
+            d.character = Some(ch);
+            d.connected = CON_PLYNG;
+            d.pwd = pwd;
+            d.host.clone()
+        }
+        None => return false,
+    };
+    write_to_q(w, did, "Reconnecting.\n\r");
+    act(w, "$n has reconnected.", true, ch, None, Vict::None, TO_ROOM);
+    log(&format!("{}[{}] has resumed.", w[ch].player.name, host));
+    true
 }
 
 /// close_socket(): the game drops a connection.
@@ -276,7 +360,8 @@ fn handle_http(w: &mut World, c: &mut Conn) {
         http_response(c, "405 Method Not Allowed", "text/plain", "method not allowed");
         return;
     }
-    let path = path.split('?').next().unwrap_or("/");
+    let (path, query) = path.split_once('?').unwrap_or((path, ""));
+    let resume = query.split('&').any(|q| q == "resume");
     match (path, upgrade, key) {
         ("/ws", true, Some(key)) => {
             if w.wizlock {
@@ -292,8 +377,9 @@ fn handle_http(w: &mut World, c: &mut Conn) {
             );
             c.outbuf.extend_from_slice(r.as_bytes());
             c.kind = Kind::Ws;
-            let did = new_descriptor(w, c.peer.ip().to_string());
+            let did = new_descriptor(w, c.peer.ip().to_string(), !resume);
             c.desc = Some(did);
+            c.awaiting_resume = resume;
             log(&format!("New connection from {}.", c.peer));
         }
         ("/status", false, _) => {
@@ -516,6 +602,7 @@ fn process_output(w: &mut World, srv: &mut Server) {
             if !text.is_empty() {
                 ws_send_text(c, &format!("{{\"t\":\"o\",\"d\":\"{}\"}}", json_escape(&text)));
             }
+            ws_send_text(c, "{\"t\":\"bye\"}");
             let f = ws_frame(8, &[]);
             c.outbuf.extend_from_slice(&f);
             c.closing = true;
@@ -526,13 +613,20 @@ fn process_output(w: &mut World, srv: &mut Server) {
     let ids: Vec<DescId> = w.descriptors.iter().map(|d| d.id).collect();
     for did in ids {
         let mut text = String::new();
-        let (snoop_by, compact, echo) = {
+        let (snoop_by, compact, echo, playing_as) = {
             let Some(d) = w.desc(did) else { continue };
+            let playing_as = match d.character {
+                Some(c) if d.connected == CON_PLYNG && w.ch_exists(c) => {
+                    let who = d.original.filter(|&o| w.ch_exists(o)).unwrap_or(c);
+                    Some(w[who].player.name.clone())
+                }
+                _ => None,
+            };
             let compact = match d.character {
                 Some(c) if w.ch_exists(c) => !w.is_npc(c) && w[c].specials.act & PLR_COMPACT != 0,
                 _ => false,
             };
-            (d.snoop.snoop_by, compact, d.echo)
+            (d.snoop.snoop_by, compact, d.echo, playing_as)
         };
         let d = w.desc_mut(did).unwrap();
         if !d.output.is_empty() {
@@ -579,6 +673,20 @@ fn process_output(w: &mut World, srv: &mut Server) {
             if c.echo_sent != echo {
                 ws_send_text(c, &format!("{{\"t\":\"echo\",\"v\":{}}}", echo));
                 c.echo_sent = echo;
+            }
+            match (playing_as, &c.token) {
+                (Some(name), None) => {
+                    let token = issue_resume_token(w, &name);
+                    ws_send_text(c, &format!("{{\"t\":\"resume\",\"k\":\"{}\"}}", token));
+                    c.token = Some(token);
+                }
+                (None, Some(token)) => {
+                    // left the game (quit to the menu): nothing to resume
+                    w.resume_tokens.remove(token);
+                    ws_send_text(c, "{\"t\":\"resume\",\"k\":null}");
+                    c.token = None;
+                }
+                _ => {}
             }
         }
     }
@@ -632,6 +740,8 @@ pub fn game_loop(w: &mut World, srv: &mut Server) {
                         dead: false,
                         frag: Vec::new(),
                         echo_sent: true,
+                        awaiting_resume: false,
+                        token: None,
                     });
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => break,
@@ -653,6 +763,17 @@ pub fn game_loop(w: &mut World, srv: &mut Server) {
             }
             if c.kind == Kind::Ws {
                 for msg in parse_ws(c) {
+                    if c.awaiting_resume {
+                        c.awaiting_resume = false;
+                        if let Some(did) = c.desc {
+                            let ok = try_resume(w, did, &msg);
+                            ws_send_text(c, &format!("{{\"t\":\"resume\",\"ok\":{}}}", ok));
+                            if !ok {
+                                greet_descriptor(w, did);
+                            }
+                        }
+                        continue;
+                    }
                     if msg.starts_with(crate::admin::OOB) {
                         handle_oob(w, c, &msg[1..]);
                         continue;

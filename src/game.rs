@@ -192,6 +192,8 @@ pub struct World {
     pub next_desc_id: DescId,
     /// connections closed by the game: (id, output still to be flushed)
     pub closed: Vec<(DescId, Vec<String>)>,
+    /// web client session resume: token -> (player name, issued at)
+    pub resume_tokens: std::collections::HashMap<String, (String, std::time::Instant)>,
 
     pub fight_messages: Vec<MessageList>,
     pub soc_mess_list: Vec<SocialMessg>,
@@ -236,6 +238,7 @@ impl World {
             descriptors: Vec::new(),
             next_desc_id: 1,
             closed: Vec::new(),
+            resume_tokens: std::collections::HashMap::new(),
             fight_messages: Vec::new(),
             soc_mess_list: Vec::new(),
             pose_messages: Vec::new(),

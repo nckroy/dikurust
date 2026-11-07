@@ -126,6 +126,17 @@ pub fn hex(data: &[u8]) -> String {
     data.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+/// 128 bits from the OS random source, as hex.  Used for session resume
+/// tokens, which must not be guessable (utils::random() is not enough).
+pub fn random_token() -> String {
+    use std::io::Read;
+    let mut b = [0u8; 16];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut b))
+        .expect("cannot read /dev/urandom");
+    hex(&b)
+}
+
 const ROUNDS: usize = 20000;
 
 /// Hash a password as "salt$hash".

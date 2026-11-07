@@ -422,8 +422,22 @@
     '/usr/guest': ['.cshrc', '.login', '.plan', 'mbox', 'notes'],
     '/usr/guest/notes': ['diku-maps', 'todo'],
   };
-  // 'sh' at the C shell, 'cmd' at the telnet> prompt, 'mud' when connected
+  // 'sh' at the C shell, 'cmd' at the telnet> prompt, 'mud' when connected,
+  // 'lost' when the link dropped and we are waiting to resume it
   let mode = 'sh', cwd = HOME, shHist = [], closing = false;
+
+  // ---- session resume ----
+  // Mobile Safari drops the WebSocket when the tab goes into the background.
+  // The server leaves the character link-dead and gives us a one-use token
+  // (renewed on every connection) to take it back without the password.
+  // sessionStorage keeps it if the browser discards and reloads the tab.
+  const RESUME_KEY = 'diku.resume';
+  const MAX_RESUME_TRIES = 6;
+  let resumeTries = 0, resumeTimer = 0;
+  const getResume = () => { try { return sessionStorage.getItem(RESUME_KEY); } catch { return null; } };
+  const setResume = k => {
+    try { k ? sessionStorage.setItem(RESUME_KEY, k) : sessionStorage.removeItem(RESUME_KEY); } catch {}
+  };
 
   const fmtDate = (d = new Date()) => {
     const p = n => String(n).padStart(2, '0');
@@ -513,6 +527,34 @@
     return true;
   }
 
+  function resumeNow() {
+    if (mode !== 'lost') return;
+    clearTimeout(resumeTimer);
+    if (!getResume()) return backToShell('Connection closed by foreign host.');
+    mode = 'connecting';
+    append(`Trying ${MUD.addr}...\n`);
+    connect(true);
+  }
+
+  // Try again after a failed resume: the network is often not back yet in
+  // the first second after the iPad wakes up.
+  function resumeLater() {
+    if (++resumeTries > MAX_RESUME_TRIES) {
+      resumeTries = 0;
+      return backToShell('telnet: Unable to connect to remote host: Connection refused');
+    }
+    mode = 'lost';
+    clearTimeout(resumeTimer);
+    if (document.visibilityState === 'visible') {
+      resumeTimer = setTimeout(resumeNow, Math.min(8000, 500 * 2 ** (resumeTries - 1)));
+    }
+  }
+
+  function wakeUp() { if (mode === 'lost') { resumeTries = 0; resumeNow(); } }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wakeUp(); });
+  addEventListener('pageshow', wakeUp);
+  addEventListener('online', wakeUp);
+
   function telnetOpen(host, port) {
     if (!host) { append('usage: open host-name [port]\n'); return true; }
     const known = MUD.names.includes(host) || host === MUD.addr;
@@ -526,12 +568,13 @@
     }
     append(`Trying ${MUD.addr}...\n`);
     mode = 'connecting';
-    setTimeout(connect, 350 + Math.random() * 500);
+    setTimeout(() => connect(!!getResume()), 350 + Math.random() * 500);
     return false;
   }
 
   function backToShell(msg) {
     ws = null; closing = false;
+    clearTimeout(resumeTimer);
     setEcho(true);
     if (msg) append(msg + '\n');
     mode = 'sh'; shPrompt();
@@ -568,23 +611,42 @@
     append('?Invalid command\n'); tnPrompt();
   }
 
-  function connect() {
+  function connect(resume) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    let opened = false;
-    ws = new WebSocket(proto + '//' + location.host + '/ws');
-    ws.onopen = () => {
+    let opened = false, bye = false;
+    const sock = ws = new WebSocket(proto + '//' + location.host + '/ws' + (resume ? '?resume' : ''));
+    sock.onopen = () => {
       opened = true; mode = 'mud';
+      if (resume) sock.send(getResume() || '');
       append(`Connected to ${MUD.names[0]}.\nEscape character is '^]'.\n`);
       input.focus();
     };
-    ws.onmessage = ev => {
+    sock.onmessage = ev => {
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
       if (m.t === 'o') append(m.d.replace(/\r/g, ''));
       else if (m.t === 'echo') setEcho(m.v);
+      else if (m.t === 'resume') {
+        if ('k' in m) setResume(m.k);   // null: we left the game
+        else if (m.ok) resumeTries = 0;
+        else setResume(null);         // stale token: the server greets us instead
+      }
+      else if (m.t === 'bye') { bye = true; setResume(null); }
     };
-    ws.onclose = () => {
-      if (!opened) return backToShell(`telnet: Unable to connect to remote host: Connection refused`);
+    sock.onclose = () => {
+      if (sock !== ws) return;        // superseded by a newer connection
+      if (!opened) {
+        if (resume && getResume()) return resumeLater();
+        return backToShell(`telnet: Unable to connect to remote host: Connection refused`);
+      }
+      if (!closing && !bye && getResume()) {
+        // Dropped under us, most likely a backgrounded tab: get it back.
+        ws = null;
+        setEcho(true);
+        append('\nConnection lost.  Reconnecting when this tab is active (^] to give up)...\n');
+        resumeTries = 0;
+        return resumeLater();
+      }
       backToShell(closing ? 'Connection closed.' : '\nConnection closed by foreign host.');
     };
   }
@@ -594,6 +656,7 @@
     const line = input.value;
     input.value = '';
     if (mode === 'connecting') return;
+    if (mode === 'lost') { input.value = ''; resumeTries = 0; resumeNow(); return; }
     if (mode === 'mud') {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       ws.send(line);
@@ -630,6 +693,7 @@
     if (e.ctrlKey && (e.key === ']' || e.code === 'BracketRight')) {
       e.preventDefault();
       if (mode === 'mud') { append('^]\n'); mode = 'cmd'; setEcho(true); tnPrompt(); }
+      else if (mode === 'lost') { append('^]\n'); backToShell('Connection closed.'); }
       return;
     }
     // ^C at the shell: abandon the line
@@ -646,6 +710,11 @@
   out.addEventListener('click', () => { if (!getSelection().toString()) input.focus(); });
   addEventListener('resize', syncGhost);
   banner();
+  // The browser discarded and reloaded this tab while we were playing.
+  if (getResume()) {
+    append('telnet mud\n');
+    telnetOpen(MUD.names[0]);
+  }
 })();
 </script>
 </body>

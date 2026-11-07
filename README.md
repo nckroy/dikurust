@@ -146,11 +146,14 @@ game plays the same.
 - **Browser instead of telnet.** The server answers plain HTTP with a small
   web client (`web/index.html`, built into the binary) and speaks WebSocket at
   `/ws`. The client masks the password field and keeps command history (up and
-  down arrows). It is styled as a green-phosphor CRT terminal; the flicker and
-  glitch effects switch off when the system asks for reduced motion. The page
-  opens on a simulated C shell (`ls`, `cd`, `echo`, `who`, `history`, `!!`,
-  …) and only connects to the game when you run `telnet mud`; that shell and
-  telnet live entirely in the browser. Real telnet clients are not supported.
+  down arrows). When the link drops, as it does whenever iPadOS or iOS Safari
+  puts a tab in the background, the client resumes the link-dead character
+  with a one-use token instead of asking for the password again. It is styled
+  as a green-phosphor CRT terminal; the flicker and glitch effects switch off
+  when the system asks for reduced motion. The page opens on a simulated C
+  shell (`ls`, `cd`, `echo`, `who`, `history`, `!!`, …) and only connects to
+  the game when you run `telnet mud`; that shell and telnet live entirely in
+  the browser. Real telnet clients are not supported.
 - **Portable save files.** The binary `players` and `pcobjs.obj` files held
   raw C structs. They are now one text file per player in `lib/plrs/`:
   `name.plr` for the character and `name.objs` for items stored at an inn. The
