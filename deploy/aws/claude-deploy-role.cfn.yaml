@@ -1,0 +1,375 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  dikumud: OpenTofu state bucket, plus a scoped IAM role (claude-dikumud-deploy)
+  that an agent assumes from your IAM Identity Center session to deploy and
+  operate dikumud. Deploy in us-east-2 with --capabilities CAPABILITY_NAMED_IAM.
+
+Parameters:
+  SsoPermissionSetName:
+    Type: String
+    Default: AdministratorAccess
+    Description: >-
+      Identity Center permission set whose sessions may assume the deploy role
+      (the AWSReservedSSO_<name>_* role in this account).
+  Domain:
+    Type: String
+    Default: diku.earth
+    Description: The only DNS names the role may change are this and www.<this>.
+  AllowedRegion:
+    Type: String
+    Default: us-east-2
+  MaxSessionSeconds:
+    Type: Number
+    Default: 3600
+    MinValue: 3600
+    MaxValue: 43200
+
+Resources:
+  # ---------------------------------------------------------------- state ----
+  StateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub dikumud-tofu-state-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-state-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+      Tags:
+        - { Key: Project, Value: dikumud }
+
+  StateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt StateBucket.Arn
+              - !Sub ${StateBucket.Arn}/*
+            Condition:
+              Bool: { aws:SecureTransport: "false" }
+
+  # ----------------------------------------------------------------- role ----
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: claude-dikumud-deploy
+      Description: Scoped role for Claude Code to deploy and operate dikumud.
+      MaxSessionDuration: !Ref MaxSessionSeconds
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: ["sts:AssumeRole", "sts:TagSession", "sts:SetSourceIdentity"]
+            Condition:
+              ArnLike:
+                aws:PrincipalArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_${SsoPermissionSetName}_*
+      Tags:
+        - { Key: Project, Value: dikumud }
+      Policies:
+        - PolicyName: dikumud-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # ---- guard rails (explicit denies win) ----
+              - Sid: DenyOutsideRegion
+                Effect: Deny
+                NotAction: ["iam:*", "route53:*", "sts:*"]
+                Resource: "*"
+                Condition:
+                  StringNotEquals: { aws:RequestedRegion: !Ref AllowedRegion }
+
+              - Sid: DenyTouchingOtherEc2Resources
+                Effect: Deny
+                Action:
+                  - ec2:TerminateInstances
+                  - ec2:StopInstances
+                  - ec2:RebootInstances
+                  - ec2:ModifyInstanceAttribute
+                  - ec2:DeleteVolume
+                  - ec2:DetachVolume
+                  - ec2:DeleteSnapshot
+                  - ec2:DeleteVpc
+                  - ec2:DeleteSubnet
+                  - ec2:DeleteRouteTable
+                  - ec2:DeleteInternetGateway
+                  - ec2:DeleteSecurityGroup
+                  - ec2:ReleaseAddress
+                  - ec2:DeleteTags
+                Resource: "*"
+                Condition:
+                  StringNotEquals: { aws:ResourceTag/Project: dikumud }
+
+              - Sid: DenyRetaggingOtherResources
+                Effect: Deny
+                Action: ec2:CreateTags
+                Resource: "*"
+                Condition:
+                  StringNotEquals: { aws:ResourceTag/Project: dikumud }
+                  "Null": { ec2:CreateAction: "true" }
+
+              - Sid: DenyBigInstances
+                Effect: Deny
+                Action: ec2:RunInstances
+                Resource: !Sub arn:${AWS::Partition}:ec2:*:*:instance/*
+                Condition:
+                  StringNotLike: { ec2:InstanceType: ["t4g.nano", "t4g.micro", "t4g.small"] }
+
+              - Sid: DenyBigVolumes
+                Effect: Deny
+                Action: [ec2:CreateVolume, ec2:RunInstances, ec2:ModifyVolume]
+                Resource: !Sub arn:${AWS::Partition}:ec2:*:*:volume/*
+                Condition:
+                  NumericGreaterThan: { ec2:VolumeSize: 20 }
+
+              # ---- read-only, account-wide ----
+              - Sid: ReadOnly
+                Effect: Allow
+                Action:
+                  - ec2:Describe*
+                  - ec2:Get*
+                  - ecr:GetAuthorizationToken
+                  - ssm:DescribeInstanceInformation
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                  - ssm:ListCommands
+                  - dlm:GetLifecyclePolicies
+                  - route53:ListHostedZones
+                  - route53:ListHostedZonesByName
+                  - route53:GetHostedZone
+                  - route53:ListResourceRecordSets
+                  - route53:ListTagsForResource
+                  - route53:GetChange
+                  - sts:GetCallerIdentity
+                Resource: "*"
+
+              # ---- OpenTofu state ----
+              - Sid: StateBucketList
+                Effect: Allow
+                Action: [s3:ListBucket, s3:GetBucketVersioning, s3:GetBucketLocation]
+                Resource: !GetAtt StateBucket.Arn
+              - Sid: StateObjects
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub ${StateBucket.Arn}/dikumud/*
+
+              # ---- network, instance, volumes, addresses ----
+              - Sid: Ec2Build
+                Effect: Allow
+                Action:
+                  - ec2:CreateVpc
+                  - ec2:DeleteVpc
+                  - ec2:ModifyVpcAttribute
+                  - ec2:CreateInternetGateway
+                  - ec2:DeleteInternetGateway
+                  - ec2:AttachInternetGateway
+                  - ec2:DetachInternetGateway
+                  - ec2:CreateSubnet
+                  - ec2:DeleteSubnet
+                  - ec2:ModifySubnetAttribute
+                  - ec2:CreateRouteTable
+                  - ec2:DeleteRouteTable
+                  - ec2:CreateRoute
+                  - ec2:ReplaceRoute
+                  - ec2:DeleteRoute
+                  - ec2:AssociateRouteTable
+                  - ec2:DisassociateRouteTable
+                  - ec2:CreateSecurityGroup
+                  - ec2:DeleteSecurityGroup
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupEgress
+                  - ec2:ModifySecurityGroupRules
+                  - ec2:UpdateSecurityGroupRuleDescriptionsIngress
+                  - ec2:UpdateSecurityGroupRuleDescriptionsEgress
+                  - ec2:RunInstances
+                  - ec2:TerminateInstances
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                  - ec2:RebootInstances
+                  - ec2:ModifyInstanceAttribute
+                  - ec2:ModifyInstanceMetadataOptions
+                  - ec2:ModifyInstanceCreditSpecification
+                  - ec2:CreateVolume
+                  - ec2:DeleteVolume
+                  - ec2:AttachVolume
+                  - ec2:DetachVolume
+                  - ec2:ModifyVolume
+                  - ec2:DeleteSnapshot
+                  - ec2:AllocateAddress
+                  - ec2:ReleaseAddress
+                  - ec2:AssociateAddress
+                  - ec2:DisassociateAddress
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                Resource: "*"
+
+              # EBS encryption with the AWS-managed key, through EC2 only.
+              - Sid: EbsKms
+                Effect: Allow
+                Action:
+                  - kms:CreateGrant
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:GenerateDataKeyWithoutPlaintext
+                  - kms:ReEncrypt*
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub ec2.${AllowedRegion}.amazonaws.com
+
+              - Sid: AmiParameter
+                Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters]
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AllowedRegion}::parameter/aws/service/ami-amazon-linux-latest/*
+
+              # ---- container registry: the dikumud repository only ----
+              - Sid: Ecr
+                Effect: Allow
+                Action:
+                  - ecr:CreateRepository
+                  - ecr:DeleteRepository
+                  - ecr:DescribeRepositories
+                  - ecr:ListTagsForResource
+                  - ecr:TagResource
+                  - ecr:UntagResource
+                  - ecr:PutImageScanningConfiguration
+                  - ecr:PutImageTagMutability
+                  - ecr:GetLifecyclePolicy
+                  - ecr:PutLifecyclePolicy
+                  - ecr:DeleteLifecyclePolicy
+                  - ecr:GetRepositoryPolicy
+                  - ecr:DescribeImages
+                  - ecr:DescribeImageScanFindings
+                  - ecr:ListImages
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                  - ecr:BatchDeleteImage
+                Resource: !Sub arn:${AWS::Partition}:ecr:${AllowedRegion}:${AWS::AccountId}:repository/dikumud
+
+              # ---- IAM: only dikumud-* roles, only these managed policies ----
+              - Sid: IamRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListInstanceProfilesForRole
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:GetInstanceProfile
+                  - iam:TagInstanceProfile
+                  - iam:UntagInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                Resource:
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/dikumud-*
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/dikumud-*
+              - Sid: IamAttachKnownPolicies
+                Effect: Allow
+                Action: [iam:AttachRolePolicy, iam:DetachRolePolicy]
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/dikumud-*
+                Condition:
+                  ArnEquals:
+                    iam:PolicyARN:
+                      - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+                      - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+                      - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole
+              - Sid: IamPassRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/dikumud-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: [ec2.amazonaws.com, dlm.amazonaws.com]
+              - Sid: IamReadPolicies
+                Effect: Allow
+                Action: [iam:GetPolicy, iam:GetPolicyVersion]
+                Resource: !Sub arn:${AWS::Partition}:iam::aws:policy/*
+
+              # ---- snapshots ----
+              - Sid: Dlm
+                Effect: Allow
+                Action:
+                  - dlm:CreateLifecyclePolicy
+                  - dlm:GetLifecyclePolicy
+                  - dlm:UpdateLifecyclePolicy
+                  - dlm:DeleteLifecyclePolicy
+                  - dlm:TagResource
+                  - dlm:UntagResource
+                  - dlm:ListTagsForResource
+                Resource: "*"
+
+              # ---- DNS: only <domain> and www.<domain>, A and CAA ----
+              - Sid: Route53Records
+                Effect: Allow
+                Action: route53:ChangeResourceRecordSets
+                Resource: !Sub arn:${AWS::Partition}:route53:::hostedzone/*
+                Condition:
+                  ForAllValues:StringEquals:
+                    route53:ChangeResourceRecordSetsNormalizedRecordNames:
+                      - !Ref Domain
+                      - !Sub www.${Domain}
+                    route53:ChangeResourceRecordSetsRecordTypes: [A, CAA]
+
+              # ---- operate the server: deploy restarts, logs, a shell ----
+              - Sid: SsmOnDikumudInstance
+                Effect: Allow
+                Action: [ssm:SendCommand, ssm:StartSession]
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AllowedRegion}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals: { aws:ResourceTag/Project: dikumud }
+              - Sid: SsmDocuments
+                Effect: Allow
+                Action: [ssm:SendCommand, ssm:StartSession]
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AllowedRegion}::document/AWS-RunShellScript
+                  - !Sub arn:${AWS::Partition}:ssm:${AllowedRegion}:${AWS::AccountId}:document/SSM-SessionManagerRunShell
+              - Sid: SsmOwnSessions
+                Effect: Allow
+                Action: [ssm:TerminateSession, ssm:ResumeSession]
+                Resource: !Sub arn:${AWS::Partition}:ssm:*:*:session/${!aws:userid}-*
+
+Outputs:
+  DeployRoleArn:
+    Value: !GetAtt DeployRole.Arn
+  StateBucket:
+    Value: !Ref StateBucket

@@ -1,0 +1,127 @@
+#cloud-config
+# Amazon Linux 2023 host for dikumud: Docker, the game container, and Caddy
+# in front of it for HTTPS. Persistent data lives on a separate EBS volume
+# mounted at /srv/dikumud, so the instance can be replaced at will.
+
+package_update: true
+packages:
+  - docker
+  - amazon-ecr-credential-helper
+  - dnf-plugins-core
+
+write_files:
+  - path: /etc/docker/daemon.json
+    content: |
+      { "log-driver": "journald" }
+
+  - path: /root/.docker/config.json
+    content: |
+      { "credHelpers": { "${registry}": "ecr-login" } }
+
+  - path: /etc/caddy/Caddyfile
+    content: |
+      ${domain} {
+        encode zstd gzip
+        reverse_proxy dikumud:4000
+      }
+
+      www.${domain} {
+        redir https://${domain}{uri} permanent
+      }
+
+  - path: /usr/local/sbin/mount-data-volume
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Wait for the data volume (attached after boot), format it the first
+      # time only, and mount it at /srv/dikumud.
+      set -euo pipefail
+      dev=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${data_volume_id}
+      for _ in $(seq 120); do [ -e "$dev" ] && break; sleep 5; done
+      [ -e "$dev" ] || { echo "data volume never appeared" >&2; exit 1; }
+      blkid "$dev" >/dev/null || mkfs.xfs -L dikumud-data "$dev"
+      uuid=$(blkid -s UUID -o value "$dev")
+      grep -q "$uuid" /etc/fstab || echo "UUID=$uuid /srv/dikumud xfs defaults,nofail 0 2" >> /etc/fstab
+      mkdir -p /srv/dikumud
+      mountpoint -q /srv/dikumud || mount /srv/dikumud
+      mkdir -p /srv/dikumud/data /srv/dikumud/caddy/data /srv/dikumud/caddy/config
+      # uid of the dikumud user inside the image
+      chown 10001 /srv/dikumud/data
+
+  - path: /etc/systemd/system/dikumud.service
+    content: |
+      [Unit]
+      Description=DikuMUD game server (container)
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+      RequiresMountsFor=/srv/dikumud
+
+      [Service]
+      Restart=always
+      RestartSec=5
+      ExecStartPre=-/usr/bin/docker network create diku
+      ExecStartPre=-/usr/bin/docker pull ${image}
+      ExecStartPre=-/usr/bin/docker rm -f dikumud
+      ExecStart=/usr/bin/docker run --rm --name dikumud --network diku \
+        -v /srv/dikumud/data:/var/lib/dikumud ${image}
+      ExecStop=/usr/bin/docker stop dikumud
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/caddy.service
+    content: |
+      [Unit]
+      Description=Caddy HTTPS front end (container)
+      Requires=docker.service
+      After=docker.service network-online.target dikumud.service
+      Wants=network-online.target
+      RequiresMountsFor=/srv/dikumud
+
+      [Service]
+      Restart=always
+      RestartSec=5
+      ExecStartPre=-/usr/bin/docker network create diku
+      ExecStartPre=-/usr/bin/docker rm -f caddy
+      ExecStart=/usr/bin/docker run --rm --name caddy --network diku \
+        -p 80:80 -p 443:443 -p 443:443/udp \
+        -v /etc/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
+        -v /srv/dikumud/caddy/data:/data \
+        -v /srv/dikumud/caddy/config:/config \
+        ${caddy_image}
+      ExecStop=/usr/bin/docker stop caddy
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # Weekly OS updates. AL2023 pins a release, so move to the latest one, and
+  # reboot only when an update needs it (kernel, glibc, systemd, ...).
+  - path: /etc/systemd/system/os-update.service
+    content: |
+      [Unit]
+      Description=Apply OS updates, reboot if required
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/dnf -y upgrade --releasever=latest
+      ExecStart=/bin/sh -c 'dnf needs-restarting -r || systemctl reboot'
+
+  - path: /etc/systemd/system/os-update.timer
+    content: |
+      [Unit]
+      Description=Weekly OS updates
+
+      [Timer]
+      OnCalendar=Sun 10:00 UTC
+      RandomizedDelaySec=30m
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+runcmd:
+  - /usr/local/sbin/mount-data-volume
+  - systemctl daemon-reload
+  - systemctl enable --now docker
+  - systemctl enable --now dikumud caddy os-update.timer

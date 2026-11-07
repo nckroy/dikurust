@@ -83,6 +83,12 @@ online, then exits. Because `compose.yaml` sets `restart: unless-stopped`,
 the server then starts again by itself, so `shutdown` also works as a clean
 restart. To keep it down, run `docker compose stop` after the `shutdown`.
 
+### On AWS
+
+The public server at <https://diku.earth/> runs on one small EC2 instance
+behind Caddy, deployed with OpenTofu. See
+[`deploy/aws/README.md`](deploy/aws/README.md).
+
 ### Your first character
 
 As in the original, the **first character created becomes the Implementor**
