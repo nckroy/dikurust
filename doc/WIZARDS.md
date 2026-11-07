@@ -440,6 +440,24 @@ The server logs to stderr (`docker compose logs`). Look there for:
 Players' `bug`, `idea` and `typo` reports are added to `lib/bugs`,
 `lib/ideas` and `lib/typos` with the room number they were written in.
 
+### 5.5 Monitoring and the Diku Wizard app
+
+`GET /status` returns a small JSON document anyone can read: whether the
+game is up, uptime, how many people are playing, connected and link-dead,
+wizlock, and the game's time and weather. It names no players and shows no
+addresses, so it's safe to point an uptime checker at.
+
+Immortals get more over their logged-in WebSocket. A text frame starting
+with `\x01snap` gets back `{"t":"wiz","d":{...}}`: every connection and
+player (room, level, address, idle time, points, flags), each zone's age
+and population, and object and mobile counts. At level 24 it also includes
+the last 300 lines of the server log. Anyone else gets
+`{"t":"wiz","err":"..."}`. Typed input can't start with a control
+character, so this can't collide with a command. The code is in
+`src/admin.rs`.
+
+The iOS app in `ios/` is built on these two. See `ios/README.md`.
+
 ---
 
 ## 6. How the world is put together

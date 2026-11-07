@@ -15,6 +15,7 @@ mod act_offensive;
 mod act_other;
 mod act_social;
 mod act_wizard;
+mod admin;
 mod board;
 mod changes;
 mod comm;
@@ -106,6 +107,7 @@ fn main() {
         }
     }
 
+    admin::mark_boot();
     log(&format!("Running game on port {}.", port));
     if let Err(e) = std::env::set_current_dir(&dir) {
         log(&format!("chdir {}: {}", dir, e));

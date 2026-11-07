@@ -88,7 +88,9 @@ pub fn strn_cmp(a: &str, b: &str, n: usize) -> i32 {
 
 /// Writes a line to the log (stderr).
 pub fn log(s: &str) {
-    eprintln!("{} :: {}", timestamp(), s);
+    let line = format!("{} :: {}", timestamp(), s);
+    eprintln!("{}", line);
+    crate::admin::remember_log(line);
 }
 
 fn timestamp() -> String {
