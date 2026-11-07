@@ -1,0 +1,14 @@
+services:
+  dikumud:
+    build: .
+    image: dikumud:latest
+    restart: unless-stopped
+    ports:
+      # Published on loopback only: put a TLS reverse proxy in front for
+      # internet play. Change to "4000:4000" to expose it on the LAN.
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - dikumud-data:/var/lib/dikumud
+
+volumes:
+  dikumud-data:

@@ -1,0 +1,19 @@
+# Keep the build context small and keep local game state out of the image.
+.git
+.claude
+target
+upstream
+web/screenshot.png
+**/.DS_Store
+
+# Files the running game writes (see .gitignore). A world update in the image
+# must never overwrite a live player file or board in the data volume.
+lib/plrs/*.plr
+lib/plrs/*.objs
+lib/plrs/*.tmp
+lib/board.messages
+lib/bugs
+lib/ideas
+lib/typos
+lib/reboot*
+lib/time

@@ -48,6 +48,41 @@ There is no TLS. For play over the internet, put it behind a reverse proxy
 that terminates HTTPS and forwards WebSocket upgrades (Caddy or nginx). The
 client switches to `wss://` automatically when it is served over HTTPS.
 
+### In a container
+
+The `Dockerfile` builds a small Debian image that runs the server as an
+unprivileged user. With Docker Compose:
+
+```bash
+docker compose up -d --build
+```
+
+That serves the game on <http://127.0.0.1:4000/>. `compose.yaml` publishes the
+port on loopback only, for a reverse proxy on the same host. To expose it on
+your network, change the mapping to `"4000:4000"`.
+
+Without Compose:
+
+```bash
+docker build -t dikumud .
+docker run -d --name dikumud -p 127.0.0.1:4000:4000 -v dikumud-data:/var/lib/dikumud dikumud
+```
+
+The data directory, `/var/lib/dikumud`, is a volume. It keeps player files,
+the bulletin board and the `bug`/`idea`/`typo` logs across restarts and image
+upgrades. On every start the container copies the image's game data (world,
+help, `motd`, `news`, …) over the copies in the volume, so edits to those
+files belong in `lib/` before you build, not in the volume. Arguments after
+the image name replace the defaults (`-b 0.0.0.0 4000`), for example
+`... dikumud -s -b 0.0.0.0 4000`.
+
+`docker stop` ends the server immediately, as killing the original did, and
+characters still online lose anything since they last saved. To stop cleanly,
+have an immortal type `shutdown` in the game first: that saves everyone who is
+online, then exits. Because `compose.yaml` sets `restart: unless-stopped`,
+the server then starts again by itself, so `shutdown` also works as a clean
+restart. To keep it down, run `docker compose stop` after the `shutdown`.
+
 ### Your first character
 
 As in the original, the **first character created becomes the Implementor**
