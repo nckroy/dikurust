@@ -32,9 +32,11 @@
 
   /* ---- the cabinet: black moulded plastic, deep chin below the tube ---- */
   #monitor {
+    --rb: 150px;          /* the wide right-hand bezel */
+    --plate: 112px;       /* nameplate width */
     position: relative; height: 100%;
     display: flex; flex-direction: column;
-    padding: 30px 38px 62px;
+    padding: 30px var(--rb) 34px 38px;
     border-radius: 22px 22px 16px 16px;
     background:
       linear-gradient(to bottom, rgba(255, 255, 255, .07), transparent 9%),
@@ -60,23 +62,57 @@
       0 -1px 0 rgba(0, 0, 0, .9),
       0 1px 0 rgba(255, 255, 255, .07);
   }
-  /* nameplate in the lower-left of the chin */
+  /* nameplate: a rectangle pressed into the right bezel, with raised
+     black lettering inside it; both lines justified to the same width */
   #badge {
-    position: absolute; left: 44px; bottom: 20px;
-    display: flex; align-items: baseline; gap: .55em;
-    font: 13px/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
-    color: #9a9d99; letter-spacing: .04em; white-space: nowrap;
-    text-shadow: 0 -1px 0 #000, 0 1px 0 rgba(255, 255, 255, .12);
+    position: absolute; top: 136px; right: calc((var(--rb) - var(--plate)) / 2 - 7px);
+    width: calc(var(--plate) + 14px); padding: 8px 7px 7px;
+    border-radius: 2px;
+    background: linear-gradient(to bottom, #060606, #0b0b0a);
+    box-shadow:
+      inset 0 2px 3px rgba(0, 0, 0, .95),
+      inset 1px 0 2px rgba(0, 0, 0, .8),
+      inset 0 -1px 0 rgba(255, 255, 255, .07),
+      inset -1px 0 0 rgba(255, 255, 255, .03),
+      0 -1px 0 rgba(0, 0, 0, .9),
+      0 1px 0 rgba(255, 255, 255, .08);
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #121211;
+    text-shadow:
+      0 -1px 0 rgba(255, 255, 255, .16),
+      -.5px 0 0 rgba(255, 255, 255, .05),
+      0 1px 1px rgba(0, 0, 0, .95);
     user-select: none;
   }
-  #badge b { font-weight: 800; font-size: 15px; letter-spacing: .14em; color: #c4c7c2; }
-  #badge i { font-style: italic; }
-  /* power lamp, lower right */
+  #badge .mark {
+    display: flex; justify-content: space-between;
+    font-weight: 900; font-size: 34px; line-height: .9;
+  }
+  #badge .name {
+    margin-top: 5px;
+    font-weight: 700; font-size: 5.6px; line-height: 1; white-space: nowrap;
+    text-align: justify; text-align-last: justify;
+    text-shadow: 0 -.5px 0 rgba(255, 255, 255, .16), 0 .5px .5px rgba(0, 0, 0, .95);
+  }
+  /* power lamp: an old domed red LED in a black bezel ring, lower right */
+  #power {
+    position: absolute; bottom: 34px; right: calc(var(--rb) / 2 - 20px); width: 40px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    font: 700 8px/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    letter-spacing: .14em; text-indent: .14em; color: #8d908b;
+    text-shadow: 0 -1px 0 #000;
+    user-select: none;
+  }
   #lamp {
-    position: absolute; right: 48px; bottom: 25px;
-    width: 7px; height: 7px; border-radius: 50%;
-    background: #6dff8a;
-    box-shadow: 0 0 6px 1px rgba(109, 255, 138, .7), inset 0 -1px 1px rgba(0, 0, 0, .4);
+    width: 13px; height: 13px; border-radius: 50%;
+    padding: 2px;
+    background: linear-gradient(to bottom, #000, #2a2a28);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .08), inset 0 1px 2px #000;
+  }
+  #lamp::after {
+    content: ""; display: block; width: 100%; height: 100%; border-radius: 50%;
+    background: radial-gradient(circle at 38% 32%, #ffe3dc 0, #ff6a52 14%, #f0200f 34%, #a80c04 64%, #3f0301 100%);
+    box-shadow: 0 0 5px 1px rgba(255, 40, 20, .55), 0 0 14px 3px rgba(255, 30, 10, .18);
   }
 
   /* ---- the tube ---- */
@@ -221,12 +257,14 @@
 
   @media (max-width: 600px) {
     body { padding: 6px; font-size: 14px; }
-    #monitor { padding: 14px 14px 40px; border-radius: 14px 14px 10px 10px; }
+    #monitor { --rb: 64px; --plate: 46px; padding: 14px var(--rb) 16px 14px; border-radius: 14px 14px 10px 10px; }
     #bezel { padding: 5px; border-radius: 16px / 12px; }
     #crt { border-radius: 14px / 10px; }
-    #badge { left: 18px; bottom: 13px; font-size: 11px; }
-    #badge b { font-size: 12px; }
-    #lamp { right: 20px; bottom: 17px; }
+    #badge { top: 68px; padding: 4px 4px 4px; right: calc((var(--rb) - var(--plate)) / 2 - 4px); width: calc(var(--plate) + 8px); }
+    #badge .mark { font-size: 14px; }
+    #badge .name { margin-top: 3px; font-size: 2.3px; }
+    #power { bottom: 16px; font-size: 6px; gap: 4px; }
+    #lamp { width: 10px; height: 10px; }
     header, form { padding-left: 16px; padding-right: 16px; }
     #out, #ghost { padding: 10px 16px; }
     header h1 { letter-spacing: .15em; }
@@ -269,8 +307,11 @@
     <feDisplacementMap id="rip-map" in="SourceGraphic" in2="n" scale="0" xChannelSelector="R" yChannelSelector="G"/>
   </filter>
 </svg>
-<div id="badge" aria-hidden="true"><b>ADDS</b><span>Viewpoint <i>3A+</i></span></div>
-<div id="lamp" aria-hidden="true"></div>
+<div id="badge" aria-hidden="true">
+  <div class="mark"><span>A</span><span>D</span><span>D</span><span>S</span></div>
+  <div class="name">APPLIED DIGITAL DATA SYSTEMS</div>
+</div>
+<div id="power" aria-hidden="true">POWER<div id="lamp"></div></div>
 </div>
 <script>
 (() => {
