@@ -134,9 +134,32 @@ resource "aws_iam_role_policy_attachment" "ecr" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
+# The Docker daemon ships container output to CloudWatch (see daemon.json in
+# cloud-init). It may only write streams in the dikumud log group.
+data "aws_iam_policy_document" "server_logs" {
+  statement {
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["${aws_cloudwatch_log_group.containers.arn}:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "server_logs" {
+  name   = "cloudwatch-logs"
+  role   = aws_iam_role.server.id
+  policy = data.aws_iam_policy_document.server_logs.json
+}
+
 resource "aws_iam_instance_profile" "server" {
   name = "dikumud-server"
   role = aws_iam_role.server.name
+}
+
+# ---- logs -------------------------------------------------------------------
+
+# Every container's output, one stream per container name (dikumud, caddy).
+resource "aws_cloudwatch_log_group" "containers" {
+  name              = "dikumud"
+  retention_in_days = var.log_retention_days
 }
 
 # ---- the server -----------------------------------------------------------
@@ -175,6 +198,7 @@ resource "aws_instance" "server" {
     # deploy.sh pushes :latest and restarts the service, which pulls it.
     image       = "${aws_ecr_repository.dikumud.repository_url}:latest"
     caddy_image = var.caddy_image
+    log_group   = aws_cloudwatch_log_group.containers.name
   })
   user_data_replace_on_change = true
 
@@ -194,6 +218,10 @@ resource "aws_instance" "server" {
   }
 
   tags = { Name = "dikumud" }
+
+  # Docker refuses to start a container whose log driver can't write, so
+  # the role must be able to reach the log group before the first boot.
+  depends_on = [aws_iam_role_policy.server_logs]
 
   lifecycle {
     ignore_changes = [ami]

@@ -10,9 +10,33 @@ packages:
   - dnf-plugins-core
 
 write_files:
+  # Container output (the game log and Caddy's log) goes straight to
+  # CloudWatch Logs, one stream per container name. Nothing is kept on the
+  # host: the local read cache behind `docker logs` is off, so read the logs
+  # with `aws logs tail`. Non-blocking mode buffers up to 4 MB in memory if
+  # CloudWatch is slow or unreachable, so the game loop never stalls on a
+  # log write; lines beyond that are dropped rather than written to disk.
   - path: /etc/docker/daemon.json
     content: |
-      { "log-driver": "journald" }
+      {
+        "log-driver": "awslogs",
+        "log-opts": {
+          "awslogs-region": "${region}",
+          "awslogs-group": "${log_group}",
+          "tag": "{{.Name}}",
+          "mode": "non-blocking",
+          "max-buffer-size": "4m",
+          "cache-disabled": "true"
+        }
+      }
+
+  # The host's own journal (cloud-init, dnf, dockerd, unit start and stop)
+  # stays local, capped so it can't fill the 8 GB root volume.
+  - path: /etc/systemd/journald.conf.d/50-size.conf
+    content: |
+      [Journal]
+      SystemMaxUse=200M
+      MaxRetentionSec=1month
 
   - path: /root/.docker/config.json
     content: |
@@ -63,8 +87,12 @@ write_files:
       ExecStartPre=-/usr/bin/docker network create diku
       ExecStartPre=-/usr/bin/docker pull ${image}
       ExecStartPre=-/usr/bin/docker rm -f dikumud
-      ExecStart=/usr/bin/docker run --rm --name dikumud --network diku \
+      # Detached, so the game's output goes only to the log driver
+      # (CloudWatch) and not through this unit into the journal too.
+      # `docker wait` keeps the unit up until the container exits.
+      ExecStartPre=/usr/bin/docker run -d --rm --name dikumud --network diku \
         -v /srv/dikumud/data:/var/lib/dikumud ${image}
+      ExecStart=/usr/bin/docker wait dikumud
       ExecStop=/usr/bin/docker stop dikumud
 
       [Install]
@@ -84,12 +112,13 @@ write_files:
       RestartSec=5
       ExecStartPre=-/usr/bin/docker network create diku
       ExecStartPre=-/usr/bin/docker rm -f caddy
-      ExecStart=/usr/bin/docker run --rm --name caddy --network diku \
+      ExecStartPre=/usr/bin/docker run -d --rm --name caddy --network diku \
         -p 80:80 -p 443:443 -p 443:443/udp \
         -v /etc/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
         -v /srv/dikumud/caddy/data:/data \
         -v /srv/dikumud/caddy/config:/config \
         ${caddy_image}
+      ExecStart=/usr/bin/docker wait caddy
       ExecStop=/usr/bin/docker stop caddy
 
       [Install]
@@ -121,6 +150,7 @@ write_files:
       WantedBy=timers.target
 
 runcmd:
+  - systemctl restart systemd-journald
   - /usr/local/sbin/mount-data-volume
   - systemctl daemon-reload
   - systemctl enable --now docker

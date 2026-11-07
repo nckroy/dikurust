@@ -425,7 +425,9 @@ file is renamed `reboot.FAILED`.
 
 ### 5.4 Logs
 
-The server logs to stderr (`docker compose logs`). Look there for:
+The server logs to stderr: `docker compose logs` locally, or on diku.earth
+the CloudWatch Logs group `dikumud` (`aws logs tail dikumud --log-stream-names
+dikumud --follow`). Look there for:
 
 - `X loads <thing> at <room>.`, `X purges Y`, `X restored Y`,
   `X rerolled Y`, `X sets Y's field to N.`, `X changes Y's skill…`,

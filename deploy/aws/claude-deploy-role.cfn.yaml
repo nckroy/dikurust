@@ -167,6 +167,9 @@ Resources:
                   - route53:ListTagsForResource
                   - route53:GetChange
                   - sts:GetCallerIdentity
+                  - logs:DescribeLogGroups
+                  - logs:GetQueryResults
+                  - logs:StopQuery
                 Resource: "*"
 
               # ---- OpenTofu state ----
@@ -291,6 +294,9 @@ Resources:
                   - iam:TagRole
                   - iam:UntagRole
                   - iam:ListRolePolicies
+                  - iam:GetRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
                   - iam:ListAttachedRolePolicies
                   - iam:ListInstanceProfilesForRole
                   - iam:CreateInstanceProfile
@@ -324,6 +330,29 @@ Resources:
                 Effect: Allow
                 Action: [iam:GetPolicy, iam:GetPolicyVersion]
                 Resource: !Sub arn:${AWS::Partition}:iam::aws:policy/*
+
+              # ---- container logs: the dikumud log group only ----
+              - Sid: Logs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:PutRetentionPolicy
+                  - logs:DeleteRetentionPolicy
+                  - logs:TagResource
+                  - logs:UntagResource
+                  - logs:ListTagsForResource
+                  - logs:TagLogGroup
+                  - logs:UntagLogGroup
+                  - logs:ListTagsLogGroup
+                  - logs:DescribeLogStreams
+                  - logs:GetLogEvents
+                  - logs:FilterLogEvents
+                  - logs:StartLiveTail
+                  - logs:StartQuery
+                Resource:
+                  - !Sub arn:${AWS::Partition}:logs:${AllowedRegion}:${AWS::AccountId}:log-group:dikumud
+                  - !Sub arn:${AWS::Partition}:logs:${AllowedRegion}:${AWS::AccountId}:log-group:dikumud:*
 
               # ---- snapshots ----
               - Sid: Dlm

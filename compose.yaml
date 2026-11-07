@@ -9,6 +9,12 @@ services:
       - "127.0.0.1:4000:4000"
     volumes:
       - dikumud-data:/var/lib/dikumud
+    # The default json-file driver never rotates; cap the log at 30 MB.
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
 
 volumes:
   dikumud-data:
