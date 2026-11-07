@@ -447,7 +447,9 @@ Players' `bug`, `idea` and `typo` reports are added to `lib/bugs`,
 `GET /status` returns a small JSON document anyone can read: whether the
 game is up, uptime, how many people are playing, connected and link-dead,
 wizlock, and the game's time and weather. It names no players and shows no
-addresses, so it's safe to point an uptime checker at.
+addresses, so it's safe to point an uptime checker at. The server builds
+it at most once every 30 seconds and serves the same copy in between, so
+its numbers (and the wizlock flag) can be up to 30 seconds old.
 
 Immortals get more over their logged-in WebSocket. A text frame starting
 with `\x01snap` gets back `{"t":"wiz","d":{...}}`: every connection and

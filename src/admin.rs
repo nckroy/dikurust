@@ -5,7 +5,9 @@
 //!
 //! * `GET /status` (public, no login): whether the game is up, uptime,
 //!   how many people are on, wizlock, game time and weather.  It names no
-//!   players and shows no addresses.
+//!   players and shows no addresses.  The body is built at most once every
+//!   `STATUS_TTL` (30 s) and served from a cache in between, so a flood of
+//!   requests costs almost nothing beyond the connections themselves.
 //!
 //! * The wizard snapshot: a client that is logged in over `/ws` as an
 //!   immortal (level 21+) sends a text frame starting with `\x01snap`. The
@@ -23,6 +25,7 @@
 use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::game::World;
 use crate::structs::*;
@@ -35,9 +38,12 @@ pub const LEVEL_IMMORTAL: i32 = 21;
 pub const LEVEL_IMPL: i32 = 24;
 
 const LOG_LINES: usize = 300;
+/// How long a built `/status` body is served before it is rebuilt.
+pub const STATUS_TTL: Duration = Duration::from_secs(30);
 
 static BOOT_TIME: OnceLock<i64> = OnceLock::new();
 static LOG_TAIL: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+static STATUS_CACHE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
 
 pub fn mark_boot() {
     let _ = BOOT_TIME.set(crate::utils::now());
@@ -236,9 +242,32 @@ fn server_obj(w: &World) -> Obj {
         .raw("world", &tw)
 }
 
-/// Body of `GET /status`.
+/// Body of `GET /status`: rebuilt at most once every `STATUS_TTL`, so the
+/// numbers in it (uptime, players, wizlock) can be up to that old.
 pub fn status_json(w: &World) -> String {
-    server_obj(w).done()
+    cached(&STATUS_CACHE, Instant::now(), STATUS_TTL, || server_obj(w).done())
+}
+
+/// Return the cached body if it is younger than `ttl` at `now`, otherwise
+/// build a new one and remember it.
+fn cached<F: FnOnce() -> String>(
+    cache: &Mutex<Option<(Instant, String)>>,
+    now: Instant,
+    ttl: Duration,
+    build: F,
+) -> String {
+    let mut slot = match cache.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some((at, body)) = slot.as_ref() {
+        if now.saturating_duration_since(*at) < ttl {
+            return body.clone();
+        }
+    }
+    let body = build();
+    *slot = Some((now, body.clone()));
+    body
 }
 
 fn zone_of_room(w: &World, vnum: i32) -> i64 {
@@ -386,6 +415,26 @@ mod tests {
     fn builds_objects() {
         let s = Obj::new().str("a", "x").num("b", -2).bool("c", true).raw("d", "[]").done();
         assert_eq!(s, r#"{"a":"x","b":-2,"c":true,"d":[]}"#);
+    }
+
+    #[test]
+    fn status_is_rebuilt_only_after_the_ttl() {
+        let cache = Mutex::new(None);
+        let t0 = Instant::now();
+        let ttl = Duration::from_secs(30);
+        let mut builds = 0;
+        let mut get = |at: Instant| {
+            cached(&cache, at, ttl, || {
+                builds += 1;
+                format!("body {}", builds)
+            })
+        };
+        assert_eq!(get(t0), "body 1");
+        assert_eq!(get(t0 + Duration::from_secs(1)), "body 1");
+        assert_eq!(get(t0 + Duration::from_millis(29_999)), "body 1");
+        assert_eq!(get(t0 + ttl), "body 2");
+        assert_eq!(get(t0 + ttl + Duration::from_secs(29)), "body 2");
+        assert_eq!(get(t0 + ttl * 2), "body 3");
     }
 
     #[test]

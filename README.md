@@ -51,7 +51,8 @@ client switches to `wss://` automatically when it is served over HTTPS.
 ### Monitoring
 
 `GET /status` returns JSON about the running game: up, uptime, players
-online, wizlock, game time and weather. It needs no login and names nobody.
+online, wizlock, game time and weather. It needs no login, names nobody, and
+is rebuilt at most every 30 seconds.
 Immortals can see much more from their phone with the **Diku Wizard** iOS
 app in [`ios/`](ios/README.md), which logs in as your character and wraps
 the wizard commands. See [§5.5 of the wizard's guide](doc/WIZARDS.md#55-monitoring-and-the-diku-wizard-app).
