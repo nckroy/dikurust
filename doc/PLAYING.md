@@ -254,7 +254,7 @@ This is the most important section of this guide.
 |---|---|
 | `rent` at a receptionist | **Kept.** Stored until you return; you start next time at that inn |
 | `quit` | **Lost.** Everything you carry and wear is dropped on the floor where you stand |
-| Link drops (browser closed) | Your character stays in the game, link-dead. Log in again with the same name to reconnect |
+| Link drops (browser closed, tab in the background) | Your character stays in the game, link-dead. The web client reconnects by itself when the tab is active again; after closing the browser, log in again with the same name |
 | Idle for 8+ mud hours | Pulled into the Void. After 48 hours you're removed from the game and lose your items |
 | The game shuts down or reboots | Your character is saved, but **items you were carrying are lost** unless you rented |
 | You die | Everything goes into your corpse ([§12](#12-death)) |
