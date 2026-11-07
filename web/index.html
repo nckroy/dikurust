@@ -439,7 +439,7 @@
     append(
 `\nUMAX 4.2 BSD (${FQDN}) (ttyp3)\n\n` +
 `login: ${USER}\n` +
-`Last login: ${fmtDate(last)} from weeg-ts2\n` +
+`Last login: ${fmtDate(last)} from portal\n` +
 `University of Iowa -- Weeg Computing Center -- Encore Multimax\n\n` +
 `  * DikuMUD is running on host "mud".  To play:  telnet mud\n` +
 `  * Escape from telnet with ^] (control-right-bracket).\n\n`);
@@ -497,7 +497,7 @@
       case 'uname': say(args.includes('-a') ? `UMAX ${HOST} 4.2 BSD Multimax` : 'UMAX'); break;
       case 'date': say(fmtDate()); break;
       case 'who':
-        say(`${USER.padEnd(9)}ttyp3   ${fmtDate().slice(4, 16)}   (weeg-ts2)`);
+        say(`${USER.padEnd(9)}ttyp3   ${fmtDate().slice(4, 16)}   (portal)`);
         say(`root     console ${fmtDate(new Date(Date.now() - 9 * 86400e3)).slice(4, 16)}`);
         break;
       case 'history':
