@@ -9,8 +9,9 @@ Internet ──► Elastic IP ──► t4g.micro (Amazon Linux 2023, arm64)
                ▲              ├─ caddy     :80/:443, Let's Encrypt TLS, WebSockets
    diku.earth  │              └─ dikumud   :4000 on a private Docker network
    www ────────┘              /srv/dikumud = separate encrypted EBS volume
-                                (player files, board, logs, Caddy certificates),
+                                (player files, board, Caddy certificates),
                                 snapshotted daily, kept 14 days
+   container output ──► CloudWatch Logs group `dikumud`, kept 30 days
 ```
 
 There's no SSH. Get a shell through SSM Session Manager.
@@ -18,7 +19,7 @@ There's no SSH. Get a shell through SSM Session Manager.
 | File | What it is |
 |---|---|
 | `claude-deploy-role.cfn.yaml` | CloudFormation stack `dikumud-deploy-access`: the OpenTofu state bucket and the scoped `claude-dikumud-deploy` role |
-| `*.tf`, `cloud-init.yaml.tftpl` | Network, instance, data volume, snapshots, ECR repository, DNS |
+| `*.tf`, `cloud-init.yaml.tftpl` | Network, instance, data volume, snapshots, ECR repository, log group, DNS |
 | `deploy.sh` | Builds the arm64 image, pushes it to ECR and restarts the game |
 
 ## Access
@@ -81,10 +82,31 @@ aws ssm start-session --target "$(tofu -chdir=deploy/aws output -raw instance_id
 
 On the server:
 
-- `journalctl -u dikumud -f` shows the game log. `journalctl -u caddy` shows the proxy log.
+- `systemctl status dikumud caddy` shows whether the containers are up.
+  `journalctl -u dikumud` shows only start, stop and Docker errors: the
+  containers' own output isn't kept on the server.
 - `systemctl restart dikumud` restarts the game, pulling `:latest` first.
 - Game data is in `/srv/dikumud/data`, which is mounted in the container
   at `/var/lib/dikumud`.
+
+## Logs
+
+Docker sends each container's output to the CloudWatch Logs group `dikumud`,
+one stream per container: `dikumud` (the game log) and `caddy` (the proxy).
+Nothing is written to disk on the server, and `docker logs` has nothing to
+show. From your machine:
+
+```bash
+aws logs tail dikumud --log-stream-names dikumud --follow
+aws logs tail dikumud --log-stream-names caddy --since 1h
+```
+
+Logs are kept for 30 days (`log_retention_days`). If CloudWatch can't be
+reached, Docker holds up to 4 MB per container in memory and then drops
+lines, so a logging outage never stalls the game. The host's own journal
+(cloud-init, updates, dockerd) stays on the server, capped at 200 MB.
+
+## OS updates
 
 OS updates install every Sunday at 10:00 UTC (plus up to 30 minutes), and the
 server reboots only when an update needs it. The instance keeps the AMI it was

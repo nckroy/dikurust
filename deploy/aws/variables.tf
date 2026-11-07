@@ -37,3 +37,9 @@ variable "snapshot_retain_days" {
   type        = number
   default     = 14
 }
+
+variable "log_retention_days" {
+  description = "Days CloudWatch keeps the container logs."
+  type        = number
+  default     = 30
+}

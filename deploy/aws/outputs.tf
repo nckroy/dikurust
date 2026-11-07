@@ -14,3 +14,8 @@ output "instance_id" {
 output "ecr_repository_url" {
   value = aws_ecr_repository.dikumud.repository_url
 }
+
+output "log_group" {
+  description = "For `aws logs tail <group> --follow`."
+  value       = aws_cloudwatch_log_group.containers.name
+}
