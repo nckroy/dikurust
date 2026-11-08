@@ -34,6 +34,10 @@ final class GameSession {
     private(set) var snapshotUpdated: Date?
     /// Set when the server refuses the snapshot (you aren't immortal).
     private(set) var snapshotError: String?
+    /// Every prototype, fetched once per login when a view asks for it.
+    private(set) var catalog: Catalog?
+    private(set) var catalogError: String?
+    private(set) var catalogLoading = false
     /// False while the server has asked to hide input (password prompts).
     private(set) var echo = true
     private(set) var characterName = ""
@@ -70,6 +74,9 @@ final class GameSession {
         loginTail = ""
         snapshot = nil
         snapshotError = nil
+        catalog = nil
+        catalogError = nil
+        catalogLoading = false
         echo = true
         phase = .connecting
         system("Connecting to \(url.absoluteString) as \(characterName)…")
@@ -83,12 +90,16 @@ final class GameSession {
 
     /// `quit`: saves the character and leaves the game cleanly.
     func quit() {
+        Task { await leave() }
+    }
+
+    /// Sends `quit`, gives the server a moment to save the character and
+    /// close, then drops the link. Not playing: just drops the link.
+    func leave() async {
         guard phase == .playing else { return disconnect() }
         send("quit")
-        Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            self.disconnect()
-        }
+        try? await Task.sleep(for: .seconds(1.5))
+        disconnect()
     }
 
     /// Drops the link. The character stays in the game, link-dead, until
@@ -98,6 +109,7 @@ final class GameSession {
         receiveTask?.cancel()
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
+        catalogLoading = false
         if phase.isActive { system("Disconnected.") }
         if case .failed = phase {} else { phase = .disconnected }
         finishCapture()
@@ -138,6 +150,16 @@ final class GameSession {
         }
     }
 
+    /// Ask for the prototype catalog. It is large and changes only with a
+    /// new world, so it is fetched once per login unless `force` is set.
+    func requestCatalog(force: Bool = false) {
+        guard isPlaying, let task, !catalogLoading else { return }
+        guard force || catalog == nil else { return }
+        catalogLoading = true
+        catalogError = nil
+        task.send(.string("\u{1}catalog")) { _ in }
+    }
+
     func clearTranscript() { lines.removeAll() }
 
     // MARK: receiving
@@ -161,6 +183,7 @@ final class GameSession {
 
     private func connectionEnded(_ error: Error, task t: URLSessionWebSocketTask) {
         snapshotTask?.cancel()
+        catalogLoading = false
         let code = (t.response as? HTTPURLResponse)?.statusCode
         let message: String
         switch (phase, code) {
@@ -198,25 +221,48 @@ final class GameSession {
         var err: String?
     }
 
+    private struct CatalogFrame: Decodable {
+        var d: Catalog?
+        var err: String?
+    }
+
+    private struct FrameType: Decodable {
+        var t: String
+    }
+
     private func handle(frame: String) {
         let data = Data(frame.utf8)
-        guard let f = try? JSONDecoder().decode(Frame.self, from: data) else {
-            if frame.contains("\"t\":\"wiz\""), let w = try? JSONDecoder.diku.decode(WizFrame.self, from: data) {
-                handleWiz(w)
+        // "wiz" and "cat" carry an object in "d", which Frame can't decode.
+        switch (try? JSONDecoder().decode(FrameType.self, from: data))?.t {
+        case "wiz":
+            guard let w = try? JSONDecoder.diku.decode(WizFrame.self, from: data) else { return }
+            // A server from before the catalog answers `catalog` this way.
+            // That says nothing about the snapshot, so don't treat it as a refusal.
+            if w.d == nil, w.err == "Unknown request.", catalogLoading {
+                catalogLoading = false
+                catalogError = "This server is too old to send a catalog. It needs the build with the catalog request (src/admin.rs)."
+                return
+            }
+            handleWiz(w)
+            return
+        case "cat":
+            catalogLoading = false
+            do {
+                let c = try JSONDecoder.diku.decode(CatalogFrame.self, from: data)
+                if let d = c.d { catalog = d } else { catalogError = c.err ?? "The server sent an empty catalog." }
+            } catch {
+                catalogError = "Couldn't read the catalog: \(error.localizedDescription)"
             }
             return
+        default:
+            break
         }
+        guard let f = try? JSONDecoder().decode(Frame.self, from: data) else { return }
         switch f.t {
         case "o":
             output(Self.clean(f.d ?? ""))
         case "echo":
             echo = f.v ?? true
-        case "wiz":
-            if let err = f.err {
-                handleWiz(WizFrame(d: nil, err: err))
-            } else if let w = try? JSONDecoder.diku.decode(WizFrame.self, from: data) {
-                handleWiz(w)
-            }
         default:
             break
         }
@@ -268,8 +314,12 @@ final class GameSession {
 
     private func login(_ text: String) {
         phase = .loggingIn
-        loginTail = String((loginTail + text).suffix(400))
-        let tail = loginTail
+        // Match against everything since the last prompt we answered, not
+        // just a short window: entering the game sends the welcome line and
+        // the whole room description in one frame, which can push the
+        // welcome far from the end.
+        let tail = loginTail + text
+        loginTail = String(tail.suffix(400))
 
         func fail(_ why: String) {
             phase = .failed(why)

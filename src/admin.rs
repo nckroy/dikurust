@@ -18,6 +18,12 @@
 //!   with a control character (the input path strips them), so this can't
 //!   collide with a typed command.
 //!
+//! * The catalog: the same immortals send `\x01catalog` and get
+//!   `{"t":"cat","d":{"mobs":[...],"objects":[...],"rooms":[...]}}`, every
+//!   prototype with its number, so the app can look things up by name
+//!   before `load` or `goto`.  It is sent only when asked for, not with
+//!   every snapshot, because it is large and hardly changes.
+//!
 //! Nothing here changes the game: the app performs wizard actions by
 //! sending ordinary commands, so the game's own level checks and logging
 //! still apply.
@@ -366,6 +372,82 @@ pub fn snapshot_json(w: &World, level: i32) -> String {
     o.done()
 }
 
+/// The names of the bits set in `v`, lower-cased, from a table like
+/// `EXTRA_BITS`.  Bits past the end of the table are left out.
+fn bit_names(v: i64, names: &[&str]) -> String {
+    array(
+        names
+            .iter()
+            .enumerate()
+            .filter(|&(i, n)| i < 63 && v & (1 << i) != 0 && !n.is_empty())
+            .map(|(_, n)| format!("\"{}\"", esc(&n.to_ascii_lowercase()))),
+    )
+}
+
+fn type_name(t: i32, names: &[&str]) -> String {
+    crate::utils::sprinttype(t, names).to_ascii_lowercase()
+}
+
+/// Body of the `{"t":"cat"}` reply: every mobile, object and room
+/// prototype, so a wizard can find a number without knowing it.  "count"
+/// is how many of that prototype exist in the world right now.  Mobiles
+/// and objects are put in the zone whose room numbers cover their own
+/// number, as the area files are laid out.
+pub fn catalog_json(w: &World) -> String {
+    use crate::constants::*;
+    let mobs = array(w.mob_index.iter().map(|m| {
+        let p = &m.proto;
+        let hp = match m.hp {
+            crate::game::HpRoll::Dice(n, s, b) => format!("{}d{}+{}", n, s, b),
+            crate::game::HpRoll::Range(lo, hi) => format!("{}-{}", lo, hi),
+        };
+        Obj::new()
+            .num("vnum", m.virtual_nr as i64)
+            .str("keywords", &p.player.name)
+            .str("short", &p.player.short_descr)
+            .str("long", p.player.long_descr.trim_end())
+            .num("level", p.player.level as i64)
+            .num("alignment", p.specials.alignment as i64)
+            .str("hp", &hp)
+            .num("gold", p.points.gold as i64)
+            .num("exp", p.points.exp as i64)
+            .raw("flags", &bit_names((p.specials.act & !ACT_ISNPC) as i64, ACTION_BITS))
+            .str("spec", m.spec)
+            .num("count", m.number as i64)
+            .num("zone", zone_of_room(w, m.virtual_nr))
+            .done()
+    }));
+    let objects = array(w.obj_index.iter().map(|o| {
+        let p = &o.proto;
+        let f = &p.obj_flags;
+        Obj::new()
+            .num("vnum", o.virtual_nr as i64)
+            .str("keywords", &p.name)
+            .str("short", &p.short_description)
+            .str("long", p.description.trim_end())
+            .str("type", &type_name(f.type_flag, ITEM_TYPES))
+            .raw("wear", &bit_names(f.wear_flags as i64, WEAR_BITS))
+            .raw("extra", &bit_names(f.extra_flags as i64, EXTRA_BITS))
+            .raw("values", &array(f.value.iter().map(|v| v.to_string())))
+            .num("weight", f.weight as i64)
+            .num("cost", f.cost as i64)
+            .num("rent", f.cost_per_day as i64)
+            .num("count", o.number as i64)
+            .num("zone", zone_of_room(w, o.virtual_nr))
+            .done()
+    }));
+    let rooms = array(w.world.iter().map(|r| {
+        Obj::new()
+            .num("vnum", r.number as i64)
+            .str("name", &r.name)
+            .str("sector", &type_name(r.sector_type, SECTOR_TYPES))
+            .raw("flags", &bit_names(r.room_flags as i64, ROOM_BITS))
+            .num("zone", r.zone as i64)
+            .done()
+    }));
+    Obj::new().raw("mobs", &mobs).raw("objects", &objects).raw("rooms", &rooms).done()
+}
+
 fn player_fields(w: &World, o: Obj, c: CharId) -> Obj {
     let ch = &w[c];
     let (vnum, room_name, zone) = if ch.in_room >= 0 {
@@ -415,6 +497,14 @@ mod tests {
     fn builds_objects() {
         let s = Obj::new().str("a", "x").num("b", -2).bool("c", true).raw("d", "[]").done();
         assert_eq!(s, r#"{"a":"x","b":-2,"c":true,"d":[]}"#);
+    }
+
+    #[test]
+    fn names_set_bits_in_lower_case() {
+        let names = ["SPEC", "SENTINEL", "", "ISNPC"];
+        assert_eq!(bit_names(0b1011, &names), r#"["spec","sentinel","isnpc"]"#);
+        assert_eq!(bit_names(0b0100, &names), "[]");
+        assert_eq!(bit_names(1 << 10, &names), "[]");
     }
 
     #[test]

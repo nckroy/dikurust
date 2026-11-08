@@ -165,3 +165,76 @@ func formatUptime(_ seconds: Int) -> String {
     if m > 0 { return "\(m)m" }
     return "\(seconds)s"
 }
+
+/// The `{"t":"cat","d":{...}}` reply to `\u{1}catalog`: every prototype in
+/// the world, so a wizard can find a number by name.
+struct Catalog: Codable, Equatable {
+    var mobs: [MobProto]
+    var objects: [ObjProto]
+    var rooms: [RoomProto]
+}
+
+struct MobProto: Codable, Equatable, Identifiable, Hashable {
+    var vnum: Int
+    var keywords: String
+    var short: String
+    var long: String
+    var level: Int
+    var alignment: Int
+    var hp: String
+    var gold: Int
+    var exp: Int
+    var flags: [String]
+    var spec: String
+    var count: Int
+    var zone: Int
+
+    var id: Int { vnum }
+    /// The first keyword: what `where` and `stat` look for.
+    var keyword: String { keywords.split(separator: " ").first.map(String.init) ?? keywords }
+}
+
+struct ObjProto: Codable, Equatable, Identifiable, Hashable {
+    var vnum: Int
+    var keywords: String
+    var short: String
+    var long: String
+    var type: String
+    var wear: [String]
+    var extra: [String]
+    var values: [Int]
+    var weight: Int
+    var cost: Int
+    var rent: Int
+    var count: Int
+    var zone: Int
+
+    var id: Int { vnum }
+    var keyword: String { keywords.split(separator: " ").first.map(String.init) ?? keywords }
+
+    /// Places it can be worn, without "take", which only means it can be picked up.
+    var wornOn: [String] { wear.filter { $0 != "take" } }
+
+    /// The one number that matters most for its type, when there is one.
+    var headline: String? {
+        func v(_ i: Int) -> Int { i < values.count ? values[i] : 0 }
+        switch type {
+        case "weapon": return "\(v(1))d\(v(2)) damage"
+        case "armor": return "AC \(v(0))"
+        case "container": return "holds \(v(0)) lbs"
+        case "light": return v(2) < 0 ? "lasts forever" : "\(v(2)) hours of light"
+        case "money": return "\(v(0)) gold"
+        default: return nil
+        }
+    }
+}
+
+struct RoomProto: Codable, Equatable, Identifiable, Hashable {
+    var vnum: Int
+    var name: String
+    var sector: String
+    var flags: [String]
+    var zone: Int
+
+    var id: Int { vnum }
+}
