@@ -8,7 +8,9 @@ instead of over telnet.
 
 The original sources are [nckroy/dikumud](https://github.com/nckroy/dikumud).
 The game data in `lib/` (world, mobiles, objects, zones, shops, help, socials)
-is the original data, unchanged.
+is the original data, unchanged. To see the whole world at once, open the
+[map of every room](https://nckroy.github.io/dikurust/). You can pan, zoom and
+search it.
 
 > DikuMUD was created by Sebastian Hammer, Michael Seifert, Hans Henrik
 > Stærfeldt, Tom Madsen and Katja Nyboe. It is **not** public domain: see
