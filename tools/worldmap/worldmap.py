@@ -181,6 +181,11 @@ args.out.parent.mkdir(parents=True, exist_ok=True)
 if args.json:
     args.out.write_text(json.dumps(data))
 else:
-    page = (HERE / 'template.html').read_text().replace('__DATA__', json.dumps(data, separators=(',', ':')))
+    tpl = (HERE / 'template.html').read_text().replace('__DATA__', json.dumps(data, separators=(',', ':')))
+    cut = tpl.index('<header>')  # title, fonts and styles go in <head>; the rest is the body
+    page = ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
+            '<style>body{margin:0}[hidden]{display:none!important}</style>\n'
+            + tpl[:cut] + '</head>\n<body>\n' + tpl[cut:] + '</body>\n</html>\n')
     args.out.write_text(page)
 print(f'{args.out}: {len(out_rooms)} rooms, {len(edges)} exits, {sum(1 for z in by_zone)} zones with rooms')
