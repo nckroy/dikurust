@@ -209,3 +209,17 @@ cargo build    # debug build
 ```
 
 The server logs to stderr.
+
+### World map
+
+```bash
+python3 tools/worldmap/worldmap.py   # writes target/worldmap.html
+```
+
+This draws every room in `lib/tinyworld.wld` as a single interactive HTML
+page you can pan, zoom and search. Rooms are placed by exit direction, and
+you can colour them by zone or by terrain. Up and down exits are drawn
+diagonally. Mazes and exits that don't match their compass direction show
+up as long or crossing lines. Pass `-o` to write the page somewhere else, or
+`--json` to get the layout as data. The script needs only Python 3, with no
+extra packages.

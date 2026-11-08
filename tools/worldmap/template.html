@@ -1,0 +1,352 @@
+<title>Midgaard Atlas</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-height map canvas with a slim instrument bar on top and a docked side panel (stacks under the map on phones). */
+:root {
+  --bg: #e9ecea;
+  --paper: #f5f7f5;
+  --ink: #1d2826;
+  --muted: #5d6b67;
+  --rule: #c5ceca;
+  --edge: #8a9893;
+  --accent: #b2541d;
+  --death: #c42d2d;
+  --node-l: 52%;
+  --node-s: 58%;
+  --halo: rgba(245,247,245,.85);
+  --font-display: "Chakra Petch", "Avenir Next Condensed", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121817; --paper: #1a2220; --ink: #dde5e2; --muted: #8d9c97; --rule: #2c3734;
+  --edge: #52615c; --accent: #e9874a; --death: #ff6b6b; --node-l: 62%; --node-s: 55%; --halo: rgba(18,24,23,.85);
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121817; --paper: #1a2220; --ink: #dde5e2; --muted: #8d9c97; --rule: #2c3734;
+  --edge: #52615c; --accent: #e9874a; --death: #ff6b6b; --node-l: 62%; --node-s: 55%; --halo: rgba(18,24,23,.85);
+  color-scheme: dark }
+
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; display: flex; flex-direction: column; }
+header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px;
+  padding-block: 12px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--rule); background: var(--paper);
+}
+h1 { font-family: var(--font-display); font-weight: 600; font-size: 20px; margin: 0; letter-spacing: .02em; text-wrap: balance; }
+.stats { font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.controls { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+input[type=search] {
+  font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 4px;
+  background: var(--bg); color: var(--ink); width: 220px; max-width: 100%;
+}
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+.seg button, .btn {
+  font: inherit; font-size: 12px; padding: 6px 10px; background: var(--bg); color: var(--muted); border: 0; cursor: pointer;
+}
+.btn { border: 1px solid var(--rule); border-radius: 4px; }
+.seg button[aria-pressed=true] { background: var(--ink); color: var(--paper); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+main { flex: 1; display: flex; min-height: 0; }
+#mapwrap { flex: 1; position: relative; min-width: 0; overflow: hidden; touch-action: none; cursor: grab; }
+#mapwrap.drag { cursor: grabbing; }
+svg#map { width: 100%; height: 100%; display: block; }
+.e { stroke: var(--edge); stroke-width: 1.4; fill: none; }
+.e.ud { stroke-dasharray: 2 3; }
+.e.one { stroke: var(--accent); stroke-dasharray: 5 3; opacity: .8; }
+.e.dim, .r.dim, .zl.dim { opacity: .12; }
+.r rect { stroke: var(--paper); stroke-width: 1.5; cursor: pointer; }
+.r.death rect { stroke: var(--death); stroke-width: 2.5; }
+.r.sel rect { stroke: var(--ink); stroke-width: 3; }
+.r.hit rect { stroke: var(--accent); stroke-width: 3; }
+.door { stroke: var(--ink); stroke-width: 2.2; }
+.lbl { font-family: var(--font-mono); font-size: 5.5px; fill: var(--ink); paint-order: stroke; stroke: var(--halo); stroke-width: 2px; pointer-events: none; display: none; }
+svg.zoomed .lbl { display: block; }
+.zl { font-family: var(--font-display); font-weight: 600; font-size: 22px; fill: var(--ink); paint-order: stroke; stroke: var(--halo); stroke-width: 5px; pointer-events: none; text-anchor: middle; letter-spacing: .03em; }
+svg.zoomed .zl { opacity: .35; }
+.zoombtns { position: absolute; right: max(12px, env(safe-area-inset-right, 0px)); bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+.zoombtns .btn { width: 34px; height: 34px; padding: 0; font-size: 16px; background: var(--paper); color: var(--ink); }
+
+aside {
+  width: 300px; flex-shrink: 0; border-left: 1px solid var(--rule); background: var(--paper); overflow-y: auto;
+  padding-block: 16px; padding-left: 16px; padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 20px;
+}
+aside h2 { font-family: var(--font-display); font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 8px; }
+#info .name { font-family: var(--font-display); font-size: 18px; font-weight: 600; margin: 0 0 4px; text-wrap: balance; }
+#info .meta { font-family: var(--font-mono); font-size: 12px; color: var(--muted); display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
+#info ul { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 2px; }
+#info li button { all: unset; cursor: pointer; font-size: 13px; display: grid; grid-template-columns: 52px 1fr; gap: 6px; width: 100%; padding: 3px 4px; border-radius: 3px; box-sizing: border-box; }
+#info li button:hover, #info li button:focus-visible { background: var(--bg); }
+#info li .dir { font-family: var(--font-mono); color: var(--muted); font-size: 12px; }
+.hint { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0; }
+#legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+#legend button { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center; width: 100%; padding: 4px; border-radius: 3px; font-size: 13px; }
+#legend button:hover, #legend button:focus-visible, #legend button[aria-pressed=true] { background: var(--bg); }
+#legend .sw { width: 12px; height: 12px; border-radius: 2px; }
+#legend .n { font-family: var(--font-mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.key { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.key div { display: flex; align-items: center; gap: 8px; }
+.key svg { flex-shrink: 0; }
+
+@media (max-width: 760px) {
+  main { flex-direction: column; }
+  #mapwrap { flex: none; height: 62vh; }
+  aside { width: auto; border-left: 0; border-top: 1px solid var(--rule); padding-left: max(16px, env(safe-area-inset-left, 0px)); }
+  body { height: auto; }
+  .controls { margin-left: 0; width: 100%; }
+  input[type=search] { flex: 1; }
+}
+</style>
+
+<header>
+  <h1>Midgaard Atlas</h1>
+  <span class="stats" id="stats"></span>
+  <div class="controls">
+    <input type="search" id="q" placeholder="Find a room: name or #vnum" aria-label="Find a room">
+    <div class="seg" role="group" aria-label="Color rooms by">
+      <button id="byZone" aria-pressed="true">Zone</button>
+      <button id="bySector" aria-pressed="false">Terrain</button>
+    </div>
+  </div>
+</header>
+<main>
+  <div id="mapwrap">
+    <svg id="map" aria-label="Map of every room in tinyworld.wld"><g id="vp"><g id="edges"></g><g id="rooms"></g><g id="zlabels"></g></g></svg>
+    <div class="zoombtns">
+      <button class="btn" id="zin" aria-label="Zoom in">+</button>
+      <button class="btn" id="zout" aria-label="Zoom out">−</button>
+      <button class="btn" id="zfit" aria-label="Fit whole world">⤢</button>
+    </div>
+  </div>
+  <aside>
+    <section id="info">
+      <h2>Room</h2>
+      <p class="hint">Click a room to see its exits. Drag to pan, scroll or pinch to zoom. Room names appear when you zoom in.</p>
+    </section>
+    <section>
+      <h2 id="legendTitle">Zones</h2>
+      <ul id="legend"></ul>
+    </section>
+    <section>
+      <h2>Key</h2>
+      <div class="key">
+        <div><svg width="28" height="8"><line x1="0" y1="4" x2="28" y2="4" class="e"/></svg>Two-way exit</div>
+        <div><svg width="28" height="8"><line x1="0" y1="4" x2="28" y2="4" class="e one"/></svg>One-way exit</div>
+        <div><svg width="28" height="8"><line x1="0" y1="4" x2="28" y2="4" class="e ud"/></svg>Up / down (drawn diagonally)</div>
+        <div><svg width="28" height="12"><line x1="0" y1="6" x2="28" y2="6" class="e"/><line x1="14" y1="1" x2="14" y2="11" class="door"/></svg>Door</div>
+        <div><svg width="28" height="14"><rect x="8" y="1" width="12" height="12" rx="2" style="fill:var(--edge);stroke:var(--death);stroke-width:2.5"/></svg>Death trap</div>
+      </div>
+    </section>
+  </aside>
+</main>
+
+<script>
+const DATA = __DATA__;
+const G = 24, S = 12;
+const DIRS = ['north','east','south','west','up','down'];
+const SECTORS = {'-1':'Unknown',0:'Inside',1:'City',2:'Field',3:'Forest',4:'Hills',5:'Mountains',6:'Water (swim)',7:'Water (boat)'};
+const SECTOR_HUE = {'-1':0,0:30,1:220,2:85,3:140,4:45,5:15,6:190,7:205};
+const SECTOR_SAT = {'-1':0,0:15,1:20};
+const NS = 'http://www.w3.org/2000/svg';
+const byV = new Map(DATA.rooms.map(r => [r.v, r]));
+const svg = document.getElementById('map'), vp = document.getElementById('vp');
+const el = (t, a) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+
+// zone hues spread by golden angle so neighbours differ
+const zoneHue = DATA.zones.map((_, i) => (i * 137.508 + 12) % 360);
+const zoneCount = DATA.zones.map(() => 0);
+DATA.rooms.forEach(r => zoneCount[r.z]++);
+let mode = 'zone';
+function fillFor(r) {
+  if (mode === 'zone') return `hsl(${zoneHue[r.z]} var(--node-s) var(--node-l))`;
+  const s = SECTOR_SAT[r.s] ?? 'var(--node-s)';
+  return `hsl(${SECTOR_HUE[r.s]} ${typeof s === 'number' ? s + '%' : s} var(--node-l))`;
+}
+
+document.getElementById('stats').textContent =
+  `${DATA.rooms.length} rooms · ${DATA.edges.length} exits · ${zoneCount.filter(n => n).length} zones`;
+
+// edges
+const edgeEls = [];
+const gE = document.getElementById('edges');
+for (const e of DATA.edges) {
+  const a = byV.get(e.a), b = byV.get(e.b);
+  const x1 = a.x*G, y1 = a.y*G, x2 = b.x*G, y2 = b.y*G;
+  const cls = ['e']; if (e.d >= 4) cls.push('ud'); if (e.one) cls.push('one');
+  const line = el('line', {x1, y1, x2, y2, class: cls.join(' ')});
+  if (e.one) line.setAttribute('marker-end', 'url(#arrow)');
+  gE.appendChild(line); edgeEls.push({e, line});
+  if (e.door) {
+    const mx = (x1+x2)/2, my = (y1+y2)/2, len = Math.hypot(x2-x1, y2-y1) || 1;
+    const nx = -(y2-y1)/len*4, ny = (x2-x1)/len*4;
+    gE.appendChild(el('line', {x1: mx-nx, y1: my-ny, x2: mx+nx, y2: my+ny, class: 'door'}));
+  }
+}
+const defs = el('defs', {});
+const mk = el('marker', {id: 'arrow', viewBox: '0 0 10 10', refX: 22, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto-start-reverse'});
+mk.appendChild(el('path', {d: 'M0,0 L10,5 L0,10 z', style: 'fill:var(--accent)'}));
+defs.appendChild(mk); svg.prepend(defs);
+
+// rooms
+const roomEls = new Map();
+const gR = document.getElementById('rooms');
+for (const r of DATA.rooms) {
+  const g = el('g', {class: 'r' + (r.f & 2 ? ' death' : ''), tabindex: -1});
+  const rect = el('rect', {x: r.x*G - S/2, y: r.y*G - S/2, width: S, height: S, rx: 2});
+  const t = el('title', {}); t.textContent = `${r.n}  #${r.v}`;
+  rect.appendChild(t);
+  const lbl = el('text', {x: r.x*G, y: r.y*G + S/2 + 6, class: 'lbl', 'text-anchor': 'middle'});
+  lbl.textContent = r.n.length > 22 ? r.n.slice(0, 21) + '…' : r.n;
+  g.append(rect, lbl);
+  g.addEventListener('click', ev => { ev.stopPropagation(); select(r.v, false); });
+  gR.appendChild(g); roomEls.set(r.v, {g, rect});
+}
+function paint() { for (const r of DATA.rooms) roomEls.get(r.v).rect.style.fill = fillFor(r); }
+
+// zone labels at the centroid of each zone's largest grid cluster
+const gZ = document.getElementById('zlabels');
+const zoneLabels = [];
+DATA.zones.forEach((name, zi) => {
+  const rs = DATA.rooms.filter(r => r.z === zi);
+  if (!rs.length) return;
+  const set = new Map(rs.map(r => [r.x + ',' + r.y, r])), seen = new Set(); let best = [];
+  for (const r of rs) {
+    const k0 = r.x + ',' + r.y; if (seen.has(k0)) continue;
+    const comp = [], st = [r]; seen.add(k0);
+    while (st.length) { const c = st.pop(); comp.push(c);
+      for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) {
+        const k = (c.x+dx) + ',' + (c.y+dy); if (set.has(k) && !seen.has(k)) { seen.add(k); st.push(set.get(k)); } } }
+    if (comp.length > best.length) best = comp;
+  }
+  const cx = best.reduce((s, r) => s + r.x, 0) / best.length, miny = Math.min(...best.map(r => r.y));
+  const t = el('text', {x: cx*G, y: miny*G - 18, class: 'zl'}); t.textContent = prettyZone(name);
+  gZ.appendChild(t); zoneLabels.push({zi, t});
+});
+function prettyZone(n) {
+  n = n.replace(/\.$/, '').replace(/_/g, ' ');
+  if (n === n.toUpperCase()) n = n.toLowerCase().replace(/(^|[\s-])\w/g, c => c.toUpperCase());
+  return n;
+}
+
+// legend
+const legend = document.getElementById('legend');
+let focusZone = null;
+function buildLegend() {
+  legend.innerHTML = '';
+  document.getElementById('legendTitle').textContent = mode === 'zone' ? 'Zones' : 'Terrain';
+  const items = mode === 'zone'
+    ? DATA.zones.map((n, i) => ({key: i, name: prettyZone(n), count: zoneCount[i], fill: fillFor({z: i})})).filter(x => x.count)
+    : Object.keys(SECTORS).map(k => ({key: +k, name: SECTORS[k], count: DATA.rooms.filter(r => r.s == k).length, fill: fillFor({s: k})})).filter(x => x.count);
+  for (const it of items) {
+    const li = document.createElement('li'), b = document.createElement('button');
+    b.setAttribute('aria-pressed', focusZone === it.key);
+    b.innerHTML = `<span class="sw" style="background:${it.fill}"></span><span></span><span class="n">${it.count}</span>`;
+    b.children[1].textContent = it.name;
+    b.onclick = () => { focusZone = focusZone === it.key ? null : it.key; applyFocus(); buildLegend(); if (focusZone !== null) fitTo(DATA.rooms.filter(match)); };
+    li.appendChild(b); legend.appendChild(li);
+  }
+}
+const match = r => mode === 'zone' ? r.z === focusZone : r.s == focusZone;
+function applyFocus() {
+  for (const r of DATA.rooms) roomEls.get(r.v).g.classList.toggle('dim', focusZone !== null && !match(r));
+  for (const {e, line} of edgeEls) line.classList.toggle('dim', focusZone !== null && !(match(byV.get(e.a)) || match(byV.get(e.b))));
+  for (const {zi, t} of zoneLabels) t.classList.toggle('dim', focusZone !== null && (mode !== 'zone' || zi !== focusZone));
+}
+for (const [id, m] of [['byZone', 'zone'], ['bySector', 'sector']]) {
+  document.getElementById(id).onclick = () => {
+    mode = m; focusZone = null;
+    document.getElementById('byZone').setAttribute('aria-pressed', m === 'zone');
+    document.getElementById('bySector').setAttribute('aria-pressed', m === 'sector');
+    paint(); buildLegend(); applyFocus();
+  };
+}
+
+// selection + info panel
+let selected = null;
+const info = document.getElementById('info');
+function select(v, center) {
+  if (selected) roomEls.get(selected).g.classList.remove('sel');
+  selected = v; const r = byV.get(v); roomEls.get(v).g.classList.add('sel');
+  const exits = [];
+  for (const e of DATA.edges) {
+    if (e.a === v) exits.push({d: e.d, to: e.b, one: e.one, door: e.door});
+    else if (e.b === v && !e.one) exits.push({d: [2,3,0,1,5,4][e.d], to: e.a, door: e.door});
+  }
+  const into = DATA.edges.filter(e => e.b === v && e.one).map(e => e.a);
+  exits.sort((a, b) => a.d - b.d);
+  info.innerHTML = `<h2>Room</h2><p class="name"></p><div class="meta">
+    <span>vnum</span><span>#${r.v}</span><span>zone</span><span></span><span>terrain</span><span>${SECTORS[r.s]}</span>
+    ${r.f & 2 ? '<span>flags</span><span style="color:var(--death)">death trap</span>' : ''}</div><ul></ul>`;
+  info.querySelector('.name').textContent = r.n;
+  info.querySelectorAll('.meta span')[3].textContent = prettyZone(DATA.zones[r.z]);
+  const ul = info.querySelector('ul');
+  const add = (dir, to, note) => {
+    const li = document.createElement('li'), b = document.createElement('button');
+    b.innerHTML = `<span class="dir"></span><span></span>`;
+    b.children[0].textContent = dir; b.children[1].textContent = byV.get(to).n + note;
+    b.onclick = () => select(to, true); li.appendChild(b); ul.appendChild(li);
+  };
+  for (const x of exits) add(DIRS[x.d], x.to, (x.door ? ' (door)' : '') + (x.one ? ' (one-way)' : ''));
+  for (const a of into) add('from', a, ' (one-way in)');
+  if (!exits.length && !into.length) ul.innerHTML = '<li class="hint">No exits.</li>';
+  if (center) centerOn(r);
+}
+
+// pan / zoom
+let tx = 0, ty = 0, k = 1;
+function apply() { vp.setAttribute('transform', `translate(${tx},${ty}) scale(${k})`); svg.classList.toggle('zoomed', k > 1.6); }
+function bounds(rs) {
+  const xs = rs.map(r => r.x*G), ys = rs.map(r => r.y*G);
+  return [Math.min(...xs) - 40, Math.min(...ys) - 50, Math.max(...xs) + 40, Math.max(...ys) + 30];
+}
+function fitTo(rs) {
+  const [x0, y0, x1, y1] = bounds(rs), w = svg.clientWidth, h = svg.clientHeight;
+  k = Math.min(w / (x1 - x0), h / (y1 - y0), 4); tx = (w - (x1 + x0) * k) / 2; ty = (h - (y1 + y0) * k) / 2; apply();
+}
+function centerOn(r) { k = Math.max(k, 2.2); tx = svg.clientWidth/2 - r.x*G*k; ty = svg.clientHeight/2 - r.y*G*k; apply(); }
+function zoomAt(f, cx, cy) { const nk = Math.min(12, Math.max(.15, k * f)); tx = cx - (cx - tx) * nk / k; ty = cy - (cy - ty) * nk / k; k = nk; apply(); }
+const wrap = document.getElementById('mapwrap');
+wrap.addEventListener('wheel', ev => { ev.preventDefault(); const b = svg.getBoundingClientRect(); zoomAt(Math.exp(-ev.deltaY * .0015), ev.clientX - b.left, ev.clientY - b.top); }, {passive: false});
+const ptrs = new Map(); let pinch = null, moved = false;
+wrap.addEventListener('pointerdown', ev => { ptrs.set(ev.pointerId, {x: ev.clientX, y: ev.clientY}); moved = false; if (ptrs.size === 1) wrap.classList.add('drag'); });
+wrap.addEventListener('pointermove', ev => {
+  if (!ptrs.has(ev.pointerId)) return;
+  const p = ptrs.get(ev.pointerId), dx = ev.clientX - p.x, dy = ev.clientY - p.y;
+  if (Math.abs(dx) + Math.abs(dy) > 2) { moved = true; if (!wrap.hasPointerCapture(ev.pointerId)) wrap.setPointerCapture(ev.pointerId); }
+  if (ptrs.size === 1) { tx += dx; ty += dy; apply(); }
+  p.x = ev.clientX; p.y = ev.clientY;
+  if (ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y), r = svg.getBoundingClientRect();
+    if (pinch) zoomAt(d / pinch, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
+    pinch = d;
+  }
+});
+const up = ev => { ptrs.delete(ev.pointerId); if (ptrs.size < 2) pinch = null; if (!ptrs.size) wrap.classList.remove('drag'); };
+wrap.addEventListener('pointerup', up); wrap.addEventListener('pointercancel', up);
+wrap.addEventListener('click', ev => { if (moved) ev.stopPropagation(); }, true);
+document.getElementById('zin').onclick = () => zoomAt(1.5, svg.clientWidth/2, svg.clientHeight/2);
+document.getElementById('zout').onclick = () => zoomAt(1/1.5, svg.clientWidth/2, svg.clientHeight/2);
+document.getElementById('zfit').onclick = () => fitTo(DATA.rooms);
+
+// search
+const q = document.getElementById('q');
+q.addEventListener('input', () => {
+  const s = q.value.trim().toLowerCase();
+  const hits = [];
+  for (const r of DATA.rooms) {
+    const hit = s && (s.startsWith('#') ? String(r.v) === s.slice(1) : r.n.toLowerCase().includes(s));
+    roomEls.get(r.v).g.classList.toggle('hit', !!hit); if (hit) hits.push(r);
+  }
+  if (hits.length === 1) select(hits[0].v, true);
+  else if (hits.length) fitTo(hits);
+});
+q.addEventListener('keydown', ev => { if (ev.key === 'Escape') { q.value = ''; q.dispatchEvent(new Event('input')); fitTo(DATA.rooms); } });
+
+paint(); buildLegend(); fitTo(DATA.rooms); select(3001, false);
+addEventListener('resize', () => fitTo(DATA.rooms));
+</script>
