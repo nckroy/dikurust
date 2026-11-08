@@ -148,18 +148,19 @@ for root in [start] + [b for b in order if b != start]:
     rs = [rect(bj, placed[bj]) for bj in cluster]
     clusters.append((cluster, (min(r[0] for r in rs), min(r[1] for r in rs), max(r[2] for r in rs), max(r[3] for r in rs))))
 
-# shelf-pack: main cluster at origin, others in rows to its right
+# Stack the clusters that can't be reached from the main map in columns just
+# to its right, top-aligned with it, starting a new column when one would run
+# past the bottom of the main map. Most are single rooms (Limbo, private rooms),
+# so this keeps them from stretching the page far wider than the world itself.
 main, mb = clusters[0]
-H = mb[3] - mb[1]
-cx, cy, rowh = mb[2] + 8, mb[1], 0
-right_edge = cx + max(H, 40)
-for cluster, bb in sorted(clusters[1:], key=lambda c: -(c[1][3]-c[1][1])):
+cx, cy, colw = mb[2] + 4, mb[1], 0
+for cluster, bb in sorted(clusters[1:], key=lambda c: (-(c[1][3]-c[1][1]), min(c[0]))):
     w, h = bb[2]-bb[0], bb[3]-bb[1]
-    if cx + w > right_edge and cx > mb[2] + 8:
-        cx = mb[2] + 8; cy += rowh + 5; rowh = 0
+    if cy + h > mb[3] and cy > mb[1]:
+        cx += colw + 4; cy = mb[1]; colw = 0
     dx, dy = cx - bb[0], cy - bb[1]
     for bj in cluster: placed[bj] = (placed[bj][0] + dx, placed[bj][1] + dy)
-    cx += w + 5; rowh = max(rowh, h)
+    cy += h + 2; colw = max(colw, w)
 
 out_rooms = []
 for v, r in rooms.items():
