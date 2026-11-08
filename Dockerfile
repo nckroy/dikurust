@@ -41,4 +41,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
   CMD ["bash", "-c", ":> /dev/tcp/127.0.0.1/4000"]
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
-CMD ["-b", "0.0.0.0", "4000"]
+# -x: the container is meant to sit behind a reverse proxy on the same host
+# (Caddy on diku.earth, or whatever fronts compose.yaml's loopback port), so
+# take players' addresses from its X-Forwarded-For.
+CMD ["-x", "-b", "0.0.0.0", "4000"]

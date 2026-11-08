@@ -23,7 +23,7 @@
 //! closing any old connection the server still thinks is alive.
 
 use std::io::{ErrorKind, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};
 
@@ -69,13 +69,16 @@ struct Conn {
 pub struct Server {
     listener: TcpListener,
     conns: Vec<Conn>,
+    /// Believe `X-Forwarded-For` from proxies on private or loopback
+    /// addresses (`-x`).  See `client_addr`.
+    trust_proxy: bool,
 }
 
 impl Server {
-    pub fn bind(addr: &str) -> std::io::Result<Server> {
+    pub fn bind(addr: &str, trust_proxy: bool) -> std::io::Result<Server> {
         let listener = TcpListener::bind(addr)?;
         listener.set_nonblocking(true)?;
-        Ok(Server { listener, conns: Vec::new() })
+        Ok(Server { listener, conns: Vec::new(), trust_proxy })
     }
     pub fn local_addr(&self) -> Option<SocketAddr> {
         self.listener.local_addr().ok()
@@ -329,7 +332,49 @@ fn http_response(c: &mut Conn, status: &str, ctype: &str, body: &str) {
     c.closing = true;
 }
 
-fn handle_http(w: &mut World, c: &mut Conn) {
+/// The address to record for a client.  Behind a reverse proxy every
+/// connection comes from the proxy, which names the real client in
+/// `X-Forwarded-For`.  Anyone can send that header, so it is believed only
+/// with `-x` and only when the connection itself comes from a private or
+/// loopback address, where the proxy lives.  The rightmost entry is the one
+/// our proxy added; anything left of it came from the client.
+///
+/// IPv4 clients written in IPv6 form (`::ffff:203.0.113.7`) come back as
+/// plain IPv4, so the same player always shows the same address.
+fn client_addr(peer: IpAddr, forwarded_for: Option<&str>, trust_proxy: bool) -> IpAddr {
+    let addr = if trust_proxy && is_private(peer) {
+        forwarded_for
+            .and_then(|v| v.rsplit(',').next())
+            .and_then(|e| parse_forwarded_ip(e.trim()))
+            .unwrap_or(peer)
+    } else {
+        peer
+    };
+    addr.to_canonical()
+}
+
+/// One `X-Forwarded-For` entry: a bare address, `[v6]`, `[v6]:port` or `v4:port`.
+fn parse_forwarded_ip(e: &str) -> Option<IpAddr> {
+    if let Ok(ip) = e.parse::<IpAddr>() {
+        return Some(ip);
+    }
+    if let Some(rest) = e.strip_prefix('[') {
+        return rest.split_once(']').and_then(|(ip, _)| ip.parse().ok());
+    }
+    e.parse::<SocketAddr>().ok().map(|s| s.ip())
+}
+
+fn is_private(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v) => v.is_loopback() || v.is_private() || v.is_link_local(),
+        IpAddr::V6(v) => match v.to_ipv4_mapped() {
+            Some(v4) => is_private(IpAddr::V4(v4)),
+            None => v.is_loopback() || v.is_unique_local() || v.is_unicast_link_local(),
+        },
+    }
+}
+
+fn handle_http(w: &mut World, c: &mut Conn, trust_proxy: bool) {
     let Some(end) = c.inbuf.windows(4).position(|x| x == b"\r\n\r\n") else {
         if c.inbuf.len() > MAX_HTTP_HEADER {
             http_response(c, "431 Request Header Fields Too Large", "text/plain", "too large");
@@ -345,6 +390,7 @@ fn handle_http(w: &mut World, c: &mut Conn) {
     let path = parts.next().unwrap_or("/");
     let mut key = None;
     let mut upgrade = false;
+    let mut forwarded_for: Option<String> = None;
     for l in lines {
         if let Some((k, v)) = l.split_once(':') {
             let k = k.trim().to_ascii_lowercase();
@@ -353,6 +399,12 @@ fn handle_http(w: &mut World, c: &mut Conn) {
                 key = Some(v.to_string());
             } else if k == "upgrade" && v.eq_ignore_ascii_case("websocket") {
                 upgrade = true;
+            } else if k == "x-forwarded-for" {
+                // repeated headers are one comma-separated list, in order
+                forwarded_for = Some(match forwarded_for.take() {
+                    Some(prev) => format!("{}, {}", prev, v),
+                    None => v.to_string(),
+                });
             }
         }
     }
@@ -377,10 +429,15 @@ fn handle_http(w: &mut World, c: &mut Conn) {
             );
             c.outbuf.extend_from_slice(r.as_bytes());
             c.kind = Kind::Ws;
-            let did = new_descriptor(w, c.peer.ip().to_string(), !resume);
+            let addr = client_addr(c.peer.ip(), forwarded_for.as_deref(), trust_proxy);
+            let did = new_descriptor(w, addr.to_string(), !resume);
             c.desc = Some(did);
             c.awaiting_resume = resume;
-            log(&format!("New connection from {}.", c.peer));
+            if addr == c.peer.ip() {
+                log(&format!("New connection from {}.", c.peer));
+            } else {
+                log(&format!("New connection from {} (via {}).", addr, c.peer));
+            }
         }
         ("/status", false, _) => {
             let body = crate::admin::status_json(w);
@@ -757,13 +814,14 @@ pub fn game_loop(w: &mut World, srv: &mut Server) {
         }
 
         // input
+        let trust_proxy = srv.trust_proxy;
         for c in srv.conns.iter_mut() {
             if c.dead || c.closing {
                 continue;
             }
             read_conn(c);
             if c.kind == Kind::Http {
-                handle_http(w, c);
+                handle_http(w, c, trust_proxy);
             }
             if c.kind == Kind::Ws {
                 for msg in parse_ws(c) {
@@ -839,5 +897,45 @@ pub fn game_loop(w: &mut World, srv: &mut Server) {
         let _ = c.stream.set_nonblocking(false);
         let _ = c.stream.set_write_timeout(Some(Duration::from_secs(2)));
         let _ = c.stream.write_all(&c.outbuf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn takes_the_client_from_a_trusted_proxy() {
+        let proxy = ip("172.18.0.3");
+        assert_eq!(client_addr(proxy, Some("203.0.113.7"), true), ip("203.0.113.7"));
+        // a client-supplied entry on the left is ignored
+        assert_eq!(client_addr(proxy, Some("10.9.9.9, 203.0.113.7"), true), ip("203.0.113.7"));
+        assert_eq!(client_addr(ip("127.0.0.1"), Some("[2001:db8::1]:443"), true), ip("2001:db8::1"));
+        assert_eq!(client_addr(ip("::1"), Some("198.51.100.2:5000"), true), ip("198.51.100.2"));
+        assert_eq!(client_addr(proxy, Some("2001:db8:85a3::8a2e:370:7334"), true), ip("2001:db8:85a3::8a2e:370:7334"));
+    }
+
+    #[test]
+    fn writes_mapped_ipv4_as_ipv4() {
+        assert_eq!(client_addr(ip("172.18.0.3"), Some("::ffff:203.0.113.7"), true), ip("203.0.113.7"));
+        assert_eq!(client_addr(ip("::ffff:198.51.100.9"), None, false), ip("198.51.100.9"));
+        // a mapped private address is still a private address
+        assert_eq!(client_addr(ip("::ffff:172.18.0.3"), Some("203.0.113.7"), true), ip("203.0.113.7"));
+    }
+
+    #[test]
+    fn ignores_the_header_otherwise() {
+        // not asked to trust a proxy
+        assert_eq!(client_addr(ip("172.18.0.3"), Some("203.0.113.7"), false), ip("172.18.0.3"));
+        // a public address can't vouch for anyone
+        assert_eq!(client_addr(ip("198.51.100.9"), Some("203.0.113.7"), true), ip("198.51.100.9"));
+        // missing or garbage
+        assert_eq!(client_addr(ip("172.18.0.3"), None, true), ip("172.18.0.3"));
+        assert_eq!(client_addr(ip("172.18.0.3"), Some("unknown"), true), ip("172.18.0.3"));
+        assert_eq!(client_addr(ip("172.18.0.3"), Some(""), true), ip("172.18.0.3"));
     }
 }
