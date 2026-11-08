@@ -48,6 +48,15 @@ There is no TLS. For play over the internet, put it behind a reverse proxy
 that terminates HTTPS and forwards WebSocket upgrades (Caddy or nginx). The
 client switches to `wss://` automatically when it is served over HTTPS.
 
+Behind a proxy every player seems to come from the proxy's address. Start
+the server with `-x` to record the address the proxy names in
+`X-Forwarded-For` instead (Caddy sends it by default; in nginx add
+`proxy_set_header X-Forwarded-For $remote_addr;`). The header is believed
+only from private and loopback addresses, and only its last entry, the one
+the proxy added. Use `-x` only when nothing but the proxy can reach the
+game's port: anyone else on a private network could claim any address.
+That address is what `users`, the server log and the Diku Wizard app show.
+
 ### Monitoring
 
 `GET /status` returns JSON about the running game: up, uptime, players
@@ -68,7 +77,9 @@ docker compose up -d --build
 
 That serves the game on <http://127.0.0.1:4000/>. `compose.yaml` publishes the
 port on loopback only, for a reverse proxy on the same host. To expose it on
-your network, change the mapping to `"4000:4000"`.
+your network, change the mapping to `"4000:4000"`, and drop `-x` from the
+command (`command: ["-b", "0.0.0.0", "4000"]`): the image starts the server
+with `-x`, which assumes only a proxy can reach it.
 
 Without Compose:
 

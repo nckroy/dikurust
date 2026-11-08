@@ -49,7 +49,7 @@ const DFLT_PORT: u16 = 4000;
 const DFLT_DIR: &str = "lib";
 
 fn usage(prog: &str) -> ! {
-    eprintln!("Usage: {} [-s] [-d pathname] [-b bind-address] [ port # ]", prog);
+    eprintln!("Usage: {} [-s] [-x] [-d pathname] [-b bind-address] [ port # ]", prog);
     std::process::exit(1);
 }
 
@@ -59,6 +59,7 @@ fn main() {
     let mut dir = DFLT_DIR.to_string();
     let mut bind = "127.0.0.1".to_string();
     let mut no_specials = false;
+    let mut trust_proxy = false;
 
     let mut pos = 1;
     while pos < args.len() && args[pos].starts_with('-') {
@@ -91,6 +92,10 @@ fn main() {
                 no_specials = true;
                 log("Suppressing assignment of special routines.");
             }
+            Some('x') => {
+                trust_proxy = true;
+                log("Taking client addresses from X-Forwarded-For when a private address sends it.");
+            }
             Some('h') => usage(&args[0]),
             _ => log(&format!("Unknown option {} in argument string.", a)),
         }
@@ -119,7 +124,7 @@ fn main() {
 
     log("Opening mother connection.");
     let addr = format!("{}:{}", bind, port);
-    let mut srv = match net::Server::bind(&addr) {
+    let mut srv = match net::Server::bind(&addr, trust_proxy) {
         Ok(s) => s,
         Err(e) => {
             log(&format!("bind {}: {}", addr, e));
