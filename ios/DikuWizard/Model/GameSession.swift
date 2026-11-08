@@ -268,8 +268,12 @@ final class GameSession {
 
     private func login(_ text: String) {
         phase = .loggingIn
-        loginTail = String((loginTail + text).suffix(400))
-        let tail = loginTail
+        // Match against everything since the last prompt we answered, not
+        // just a short window: entering the game sends the welcome line and
+        // the whole room description in one frame, which can push the
+        // welcome far from the end.
+        let tail = loginTail + text
+        loginTail = String(tail.suffix(400))
 
         func fail(_ why: String) {
             phase = .failed(why)
