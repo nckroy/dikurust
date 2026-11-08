@@ -217,7 +217,9 @@ python3 tools/worldmap/worldmap.py   # writes target/worldmap.html
 ```
 
 This draws every room in `lib/tinyworld.wld` as a single interactive HTML
-page you can pan, zoom and search. Rooms are placed by exit direction, and
+page you can pan, zoom and search. The current map is published at
+<https://nckroy.github.io/dikurust/>. The Pages workflow rebuilds it whenever
+the world files or the tool change on `main`. Rooms are placed by exit direction, and
 you can colour them by zone or by terrain. Up and down exits are drawn
 diagonally. Mazes and exits that don't match their compass direction show
 up as long or crossing lines. Pass `-o` to write the page somewhere else, or
