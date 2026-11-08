@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum Section: String, CaseIterable, Identifiable, Hashable {
-    case status, players, world, console, log, server, settings
+    case status, players, world, catalog, console, log, server, settings
 
     var id: String { rawValue }
 
@@ -10,6 +10,7 @@ enum Section: String, CaseIterable, Identifiable, Hashable {
         case .status: return "Status"
         case .players: return "Players"
         case .world: return "World"
+        case .catalog: return "Catalog"
         case .console: return "Console"
         case .log: return "Server Log"
         case .server: return "Server"
@@ -22,6 +23,7 @@ enum Section: String, CaseIterable, Identifiable, Hashable {
         case .status: return "waveform.path.ecg"
         case .players: return "person.3"
         case .world: return "map"
+        case .catalog: return "books.vertical"
         case .console: return "terminal"
         case .log: return "doc.text.magnifyingglass"
         case .server: return "bolt.shield"
@@ -34,6 +36,7 @@ enum Section: String, CaseIterable, Identifiable, Hashable {
         case .status: StatusView()
         case .players: PlayersView()
         case .world: WorldView()
+        case .catalog: CatalogView()
         case .console: ConsoleView()
         case .log: LogView()
         case .server: ServerControlView()
@@ -82,7 +85,7 @@ struct RootView: View {
 
 extension Section {
     static let phoneTabs: [Section] = [.status, .players, .world, .console]
-    static let phoneMenu: [Section] = [.server, .log, .settings]
+    static let phoneMenu: [Section] = [.catalog, .server, .log, .settings]
 }
 
 /// The phone's fifth tab: connection, then the less-used sections.

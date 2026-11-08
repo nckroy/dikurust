@@ -30,12 +30,24 @@ Things to know:
 - **One login at a time.** The game refuses a second login for a character
   already playing ("Already playing, cannot connect"). Quit the web client
   first, or let its link drop.
-- Closing the app or losing the network drops the link. Your character stays
-  in the game, link-dead, and the app reconnects into it next time. Use
-  **Quit the game** in Console or Settings to leave cleanly.
+- Leaving the app (going to the Home Screen, switching apps, or closing it)
+  quits the game, so your character is saved and leaves the world. Coming
+  back logs in again if *auto-connect* is on. If you were fighting, the game
+  won't let you quit, and the character stays in the game link-dead.
+- Losing the network drops the link. Your character stays in the game,
+  link-dead, and the app reconnects into it next time.
 - **Wizlock locks the app out too.** Lift it before you disconnect.
 - On diku.earth, `shutdown` and `shutdown reboot` both bring the world back
   in a few seconds, because the container restarts itself.
+
+## The Catalog
+
+**Catalog** (under World, the iPad sidebar, or the Wizard tab) lists every
+mobile, object and room prototype, searchable by name, keyword or number
+and filterable by zone. Each one shows its stats and how many exist right
+now, with buttons to load it into your room (level 22), find where they
+are, or go to and look at a room. The app asks for it with `\x01catalog`
+once per login; pull down to fetch it again.
 
 ## Building
 

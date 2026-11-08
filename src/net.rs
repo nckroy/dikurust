@@ -406,6 +406,10 @@ fn handle_oob(w: &World, c: &mut Conn, req: &str) {
             format!("{{\"t\":\"wiz\",\"d\":{}}}", crate::admin::snapshot_json(w, l))
         }
         ("snap", _) => "{\"t\":\"wiz\",\"err\":\"Only immortals who are in the game can ask for this.\"}".to_string(),
+        ("catalog", Some(l)) if l >= crate::admin::LEVEL_IMMORTAL => {
+            format!("{{\"t\":\"cat\",\"d\":{}}}", crate::admin::catalog_json(w))
+        }
+        ("catalog", _) => "{\"t\":\"cat\",\"err\":\"Only immortals who are in the game can ask for this.\"}".to_string(),
         _ => "{\"t\":\"wiz\",\"err\":\"Unknown request.\"}".to_string(),
     };
     ws_send_text(c, &reply);

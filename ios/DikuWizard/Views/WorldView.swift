@@ -19,6 +19,11 @@ struct WorldView: View {
                     ask("Where is…", "location.magnifyingglass",
                         PromptAction(title: "Where", message: "Searches the world for characters and objects.", placeholder: "fido") { "where \($0)" })
                 }
+                SwiftUI.Section {
+                    NavigationLink { CatalogView() } label: {
+                        Label("Browse mobiles, objects and rooms", systemImage: "books.vertical")
+                    }
+                }
                 if snap.viewerLevel >= 22 {
                     SwiftUI.Section("Create & destroy") {
                         ask("Load a mobile…", "pawprint",
